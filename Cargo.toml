@@ -1,0 +1,23 @@
+[package]
+name = "rvab_cli_r"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "librvab_cli_r"
+path = "src/lib.rs"
+
+# Specify the entry point for the binary
+[[bin]]
+name = "rvab_cli_r"
+path = "src/bin/main.rs"
+
+[dependencies]
+argh = "0.1.12"
+serde = "1.0.197"
+gpt = "4.0.0-rc.1"
+toml = "0.8.12"
+crc32fast = "1.4.0"
+nix = { version = "0.28.0", features = ["fs"] }
+
