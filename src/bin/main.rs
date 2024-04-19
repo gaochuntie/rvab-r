@@ -1,6 +1,7 @@
+use std::fs;
 use std::thread::current;
 use argh::FromArgs;
-use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots};
+use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, try_init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots};
 
 #[derive(FromArgs)]
 /// rvab command line multi call tool,
@@ -29,13 +30,17 @@ name = "init",
 description = "set necessary gpt layout: move and resize userdata,\
 blank 64mib before each userdata partition,and free up space for backup and other slots. \
 Use -o <output file> to generate a template config file",
-example = "rvab init -f <config>",
+example = "rvab init -f <config> ",
+example = "rvab init -f <config> --slot a",
 )]
 /// set necessary gpt layout
 struct InitMode {
     /// config file for init
     #[argh(option, short = 'f')]
     config: Option<String>,
+    /// which slot do you want to be the first slot , default is the first slot in config file
+    #[argh(option)]
+    slot: Option<String>,
     /// generate template config file
     #[argh(option, short = 't')]
     template: Option<String>,
@@ -142,7 +147,11 @@ fn main() {
                 return;
             }
             if let Some(config) = init.config {
-                init_partition_table_layout(&config);
+                let ret = try_init_partition_table_layout(&config, &init.slot, true);
+                if ret.is_err() {
+                    eprintln!("Init failed {}", ret.err().unwrap());
+                    //,try restoring gpt partition table...
+                }
                 return;
             }
             println!("Option required");

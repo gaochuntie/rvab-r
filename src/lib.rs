@@ -1,7 +1,7 @@
-mod constants;
-mod gpt_helper;
-mod metadata;
-mod android_flashable;
+pub mod constants;
+pub mod gpt_helper;
+pub mod metadata;
+pub mod android_flashable;
 mod backup_factory;
 mod backup_losetup;
 mod backup_diskspace;
@@ -10,7 +10,7 @@ mod backup_ftp;
 mod config_helper;
 mod math_support;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -18,7 +18,8 @@ use gpt::disk::LogicalBlockSize;
 use constants::*;
 use gpt_helper::get_userdata_driver;
 use crate::backup_factory::BackupType;
-use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, get_disk_sector_size};
+use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, calculate_firmware_size, get_disk_sector_size};
+use crate::math_support::Interval;
 use crate::metadata::{Metadata, Slot, SlotsTomlConfig};
 
 extern crate gpt;
@@ -47,7 +48,7 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
         }
     }
     disk.remove_partition(userdata_id).expect("remove partition failed");
-    //find largest free space
+    //find the largest free space
     let (start_lba, end_lba) = gpt_helper::find_max_free_tuple(&disk.find_free_sectors());
     println!("Find largest available space from {}*{} to {}*{} byte", start_lba, sector.as_u64(), end_lba, sector.as_u64());
 
@@ -72,17 +73,48 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
 
 /// Check slots config file without really modify
 pub fn check_slots_config(path: &str) {
-    // check the flowing things (there are 1-several slots : 1 is fw size larger than backup size 2 is any part overlaps 3 is any thing overflows disk size
-    let data=fs::read_to_string(path).expect("Error: read config file failed");
+    // check the flowing things (there are 1-several slots : 1 is fw size larger than backup size
+    // 2 is any part overlaps and is anything overflows disk size
+    let data = fs::read_to_string(path).expect("Error: read config file failed");
     let slots_config: SlotsTomlConfig = toml::from_str(&data).expect("Error: parse config file failed");
-    let slots = slots_config.slot;
-    for slot in slots.iter(){
-        let fw_size=
+    let slots = &slots_config.slot;
+    for slot in slots.iter() {
+        println!("Checking for slot : {}", &slot.slot_name);
+        // 1 first check fw size
+        //merge exclude and dynamic partitions list into a total exclude list
+        let mut exclude_list = HashSet::new();
+        exclude_list.extend(slot.backup_exclude_list.iter().cloned());
+        for (name, raw_pt) in slot.dyn_partition_set.iter() {
+            exclude_list.insert(name.clone());
+        }
+        //calculate fw size
+        let (num, size_bytes) = calculate_firmware_size(&exclude_list);
+        let backup_target_size = (slot.backup_target_end - slot.backup_target_start + 1) * get_disk_sector_size(&slot.backup_target);
+        if size_bytes > backup_target_size {
+            println!("\t1 Error: firmware size {} bytes is larger than backup target size {} bytes , {} > {}",
+                     size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
+        }else{
+            println!("\t1 Pass: firmware size {} bytes is smaller than backup target size {} bytes , {} < {}",
+                     size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
+        }
+
+        // 2 check overlaps and is anything overflows disk size
+        let ret = try_init_partition_table_layout(&path.to_string(), &Some(slot.slot_name.clone()), false);
+        if ret.is_err() {
+            eprintln!("\t2 {}", ret.err().unwrap());
+        }else{
+            println!("\t2 Pass: no overlaps and no overflow disk size");
+        }
     }
+
+
 }
 
-/// Init partition table layout
-pub fn init_partition_table_layout(path: &str) {}
+/// Try init partition table layout
+pub fn try_init_partition_table_layout(cfg_path:&String, initial_slot: &Option<String>, save_changes: bool) -> Result<(), &'static str> {
+
+    Ok(())
+}
 
 /// update config to all slots
 pub fn update_config_to_all_slots(path: &str) {
@@ -125,10 +157,10 @@ pub fn list_slots(slot_name: Option<String>, only_name: bool) {
     }
 
     if only_name {
-        let mut counter=0;
+        let mut counter = 0;
         for (slot_name, _) in metadata.slots.iter() {
             counter += 1;
-            println!("{} : {}",counter, slot_name);
+            println!("{} : {}", counter, slot_name);
         };
         return;
     }
@@ -136,10 +168,10 @@ pub fn list_slots(slot_name: Option<String>, only_name: bool) {
 }
 
 ///
-pub fn dump_current_metadata(path:&str) {
+pub fn dump_current_metadata(path: &str) {
     let metadata = Metadata::from_fw_metadata().unwrap();
     //convert slot toml
-    let slots_config=SlotsTomlConfig{slot:metadata.slots.values().cloned().collect()};
+    let slots_config = SlotsTomlConfig { slot: metadata.slots.values().cloned().collect() };
     let toml = toml::to_string(&slots_config).unwrap();
     let mut file = std::fs::File::create(path).expect("Error: create dump file failed");
     file.write_all(toml.as_bytes()).expect("Error: write dump file failed");

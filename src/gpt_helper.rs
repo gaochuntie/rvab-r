@@ -92,7 +92,7 @@ pub fn auto_layout_freespace_example(start_lba: u64, end_lba: u64, sector: u64, 
             dual_files.insert(item.to_string());
         }
     }
-    let (_fw_num, fw_size) = calculate_firmware_size(ex_back_fpath);
+    let (_fw_num, fw_size) = calculate_firmware_size(&exclude_files);
 
     //test partition backup
     let mut backup_type = BackupType::Losetup;
@@ -173,19 +173,16 @@ pub fn auto_layout_freespace_example(start_lba: u64, end_lba: u64, sector: u64, 
 /// Calculate the size of the firmwares,return in (total_num,total_bytes)
 /// include all physical partitions under block/by-name/ except userdata
 /// panic if block device dir access error occurs or total size=0
-pub fn calculate_firmware_size(ex_back_fpath: &Option<String>) -> (u64, u64) {
+pub fn calculate_firmware_size(ex_back_list: &HashSet<String>) -> (u64, u64) {
     let mut firmware_size: u64 = 0;
     let dev_dir = get_block_dev_dir();
     let mut total_num = 0;
     let files = fs::read_dir(&dev_dir).unwrap();
     let mut exclude_files = get_block_dev_filenames();
-    if let Some(path) = ex_back_fpath {
-        //read exclude file and add into exclude list
-        let file = fs::read_to_string(path).expect("Error reading exclude file");
-        let files: Vec<&str> = file.split("\n").collect();
-        for item in files {
-            exclude_files.insert(item.to_string());
-        }
+    // merge ex_back_list into exclude_files
+
+    for item in ex_back_list {
+        exclude_files.insert(item.clone());
     };
 
     for file in files {
