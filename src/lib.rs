@@ -105,6 +105,7 @@ pub fn check_slots_config(path: &str) {
         }else{
             println!("\t2 Pass: no overlaps and no overflow disk size");
         }
+        //TODO feather check
     }
 
 
@@ -112,7 +113,16 @@ pub fn check_slots_config(path: &str) {
 
 /// Try init partition table layout
 pub fn try_init_partition_table_layout(cfg_path:&String, initial_slot: &Option<String>, save_changes: bool) -> Result<(), &'static str> {
-
+    let data = fs::read_to_string(cfg_path).expect("Error: read config file failed");
+    let slots_config: SlotsTomlConfig = toml::from_str(&data).expect("Error: parse config file failed");
+    let slots = &slots_config.slot;
+    let mut target_slot;
+    if let Some(init_target)=initial_slot{
+        target_slot = slots.iter().find(|&x| x.slot_name == *init_target).expect("Error: no such slot found");
+    }else{
+        target_slot=slots.get(0).expect("Error: no slot found");
+    }
+    // TODO
     Ok(())
 }
 

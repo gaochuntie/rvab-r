@@ -293,7 +293,7 @@ pub fn get_block_dev_filenames() -> HashSet<String> {
 }
 
 /// get part accelerate location via gpt table,return (main_driver,id_num,first_lba,last_lba,sector_size)
-pub fn get_part_accelerate_location(part_name: &str) -> Result<(String, u32, u64, u64,u64), &'static str> {
+pub fn get_part_accelerate_location(part_name: &str) -> Result<(String, u32, u64, u64, u64), &'static str> {
     let path = format!("{}{}", get_block_dev_dir(), part_name);
     let disk_path = get_partition_main_driver(&path)?;
     let sector_size = get_disk_sector_size(&disk_path);
@@ -308,12 +308,12 @@ pub fn get_part_accelerate_location(part_name: &str) -> Result<(String, u32, u64
     if !(disk.is_ok()) {
         return Err("Error: open disk failed");
     }
-    let binding_disk= disk.unwrap();
+    let binding_disk = disk.unwrap();
     let (id, part) = binding_disk
         .partitions().iter()
         .find(|(_, partition)| partition.name == part_name)
         .ok_or("Error: partition not found")?;
-    Ok((disk_path, *id, part.first_lba, part.last_lba,sector_size))
+    Ok((disk_path, *id, part.first_lba, part.last_lba, sector_size))
 }
 
 /// get disk sector size
@@ -353,3 +353,29 @@ pub fn is_disk_segment_used(disk: &str, start_lba: u64, end_lba: u64) -> Option<
     Some(find_part_name)
 }
 
+/// align partition lba (only shrink)
+pub fn alignment_partition(first_lba: &mut u64, last_lba: &mut u64, alignment: u64, dis_align_last_lba: bool) {
+    if *first_lba % alignment != 0 {
+        *first_lba = *first_lba + alignment - *first_lba % alignment;
+    }
+    if dis_align_last_lba {
+        if *last_lba % alignment == 0 {
+            *last_lba = *last_lba - *last_lba % alignment - 1;
+        }
+    };
+}
+
+/// get disk partitions alignment via sysfs
+/// panic if file read error or parse error , (rarely occurs)
+pub fn get_disk_part_boundary_alignment(disk: &str) -> u32 {
+    // cal via physical block size / logical block size
+    let path = Path::new(disk);
+    let disk_name = path.file_name().unwrap().to_str().unwrap();
+    let path = format!("/sys/class/block/{}/queue/physical_block_size", disk_name);
+    let size_str = fs::read_to_string(path).expect("Error reading size file");
+    let phy_size: u32 = size_str.trim().parse().expect("Error parsing size");
+    let path = format!("/sys/class/block/{}/queue/logical_block_size", disk_name);
+    let size_str = fs::read_to_string(path).expect("Error reading size file");
+    let log_size: u32 = size_str.trim().parse().expect("Error parsing size");
+    phy_size / log_size
+}
