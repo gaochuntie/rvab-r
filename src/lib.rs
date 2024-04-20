@@ -27,9 +27,9 @@ extern crate gpt;
 /// Generate a template init config file
 /// panic if any error occurs
 pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<String>, dual_list: Option<String>) -> std::io::Result<()> {
-    let userdata1_driver = get_userdata_driver();
+    let userdata_driver = get_userdata_driver();
     let mut back_min_size_sector = 0;
-    let sector_size = get_disk_sector_size(&userdata1_driver);
+    let sector_size = get_disk_sector_size(&userdata_driver);
     let mut sector = LogicalBlockSize::Lb512;
     if sector_size == 4096 {
         sector = LogicalBlockSize::Lb4096;
@@ -38,7 +38,7 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
     };
 
     let mut gpt_cfg = gpt::GptConfig::new().writable(false).logical_block_size(sector.clone());
-    let mut disk_result = gpt_cfg.open(&userdata1_driver);
+    let mut disk_result = gpt_cfg.open(&userdata_driver);
     ///panic if disk open failed
     let mut disk = disk_result.expect("open disk failed");
     let mut userdata_id = 0;
@@ -52,7 +52,7 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
     let (start_lba, end_lba) = gpt_helper::find_max_free_tuple(&disk.find_free_sectors());
     println!("Find largest available space from {}*{} to {}*{} byte", start_lba, sector.as_u64(), end_lba, sector.as_u64());
 
-    let (slot1, slot2) = auto_layout_freespace_example(start_lba, end_lba, sector.as_u64(), &ex_back_fpath, &dual_list, &mut back_min_size_sector);
+    let (slot1, slot2) = auto_layout_freespace_example(&userdata_driver,start_lba, end_lba, sector.as_u64(), &ex_back_fpath, &dual_list, &mut back_min_size_sector);
     let config = SlotsTomlConfig { slot: vec![slot1, slot2] };
     let toml = toml::to_string(&config).unwrap();
 

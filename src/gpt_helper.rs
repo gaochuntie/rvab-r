@@ -61,17 +61,27 @@ pub fn find_max_free_tuple(tuples: &Vec<(u64, u64)>) -> (u64, u64) {
     (max_start, max_end)
 }
 
-/// Auto layout for two userdata
+/// Auto layout for two slot
 /// Default space strategy: peace split
 /// Default backuptype: test order: losetup,partition,binaryspace
 /// Default backup_target: follow the userdata
 /// panic if no backup type available or no enough space
-pub fn auto_layout_freespace_example(start_lba: u64, end_lba: u64, sector: u64, ex_back_fpath: &Option<String>, dual_list: &Option<String>, _back_min_size_sector: &mut u64) -> (Slot, Slot) {
+/// panic if get part accelerate location failed
+pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba: u64, sector: u64, ex_back_fpath: &Option<String>, dual_list: &Option<String>, _back_min_size_sector: &mut u64) -> (Slot, Slot) {
     //half split
+    let mut end_lba = end_lba;
+    let mut start_lba = start_lba;
     let p1_size = (end_lba - start_lba + 1) / 2;
     let p2_size = (end_lba - start_lba + 1) - p1_size;
-    let p1_end = start_lba + p1_size - 1;
-    let p2_start = p1_end + 1;
+
+    let mut p1_end = start_lba + p1_size - 1;
+    alignment_partition(&mut start_lba, &mut p1_end, 2, true);
+
+    let mut p2_start = p1_end + 1;
+    alignment_partition(&mut p2_start, &mut end_lba, 2, true);
+
+    let mut p1_used_pointer = start_lba;
+    let mut p2_used_pointer = p2_start;
     // exclude file list
     let mut exclude_files = HashSet::new();
     let mut dual_files = HashSet::new();
@@ -107,62 +117,109 @@ pub fn auto_layout_freespace_example(start_lba: u64, end_lba: u64, sector: u64, 
     }
     let back_min_size_sector = backup_type.guess_backup_target_partition_size_sector(fw_size, sector);
     *_back_min_size_sector = back_min_size_sector;
+
     //construct slots
-    let mut userdata1_start_lba = calculate_metadata_interval(start_lba, sector).1;
-    //alignment 2 boundary
-    if userdata1_start_lba % 2 == 1 {
-        userdata1_start_lba += 1;
+
+    //add dyn parts
+    let mut map1 = HashMap::new();
+    let mut map2 = HashMap::new();
+
+    for part_name in dual_files {
+        let (_driver, _id, first_lba, last_lba, sector_size) = get_part_accelerate_location(&part_name).unwrap();
+
+        let length_bytes = (last_lba - first_lba + 1) * sector_size;
+        let mut length_lba = length_bytes / sector;
+        if length_lba % sector != 0 {
+            length_lba += 1;
+        };
+        //for slot1
+        let mut dyn_start_lba = p1_used_pointer;
+        let mut dyn_end_lba = dyn_start_lba + length_lba - 1;
+        /// TODO align partition on 2-boundary default,this is my guess
+        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, 2, true);
+        p1_used_pointer = dyn_end_lba + 1;
+        let part = PartitionRawTarget {
+            part_name: part_name.clone(),
+            driver: target_disk.to_string(),
+            start_lba: dyn_start_lba,
+            end_lba: dyn_end_lba,
+        };
+        map1.insert(part_name.clone(), part.clone());
+
+        //for slot2
+        let mut dyn_start_lba = p2_used_pointer;
+        let mut dyn_end_lba = dyn_start_lba + length_lba - 1;
+        /// TODO align partition on 2-boundary default,this is my guess
+        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, 2, true);
+        p2_used_pointer = dyn_end_lba + 1;
+        let part = PartitionRawTarget {
+            part_name: part_name.clone(),
+            driver: target_disk.to_string(),
+            start_lba: dyn_start_lba,
+            end_lba: dyn_end_lba,
+        };
+        map2.insert(part_name.clone(), part);
     };
-    let mut userdata2_start_lba = calculate_metadata_interval(p2_start, sector).1;
-    //alignment 2 boundary
-    if userdata2_start_lba % 2 == 1 {
-        userdata2_start_lba += 1;
-    };
+
+    //add userdata
+    let (_, metadata1_end) = calculate_metadata_interval(p1_used_pointer, sector);
+    let mut userdata1_start_lba = metadata1_end + 1;
+    alignment_partition(&mut userdata1_start_lba, &mut 0, 2, false);
+    p1_used_pointer = userdata1_start_lba;
+    let (_, metadata2_end) = calculate_metadata_interval(p2_used_pointer, sector);
+    let mut userdata2_start_lba = metadata2_end + 1;
+    alignment_partition(&mut userdata2_start_lba, &mut 0, 2, false);
+    p2_used_pointer = userdata2_start_lba;
+
     let backup_target = "none".to_string();
     ///test space layout is correct for partition backup and binaryspace backup and losetup backup
     if back_min_size_sector > p2_size {
         panic!("Error: no enough space for backup target {}", bytes2ieee(back_min_size_sector * sector));
     }
-    if (p1_end - back_min_size_sector + 1 - (USERDATA_MIN_SIZE / sector) - (METADATA_SIZE_BYTES / sector)) < start_lba {
+    if (userdata1_start_lba + (USERDATA_MIN_SIZE / sector) + back_min_size_sector) > p1_end {
         panic!("Error: no enough space for userdata1");
     };
-    if (end_lba - back_min_size_sector + 1 - (USERDATA_MIN_SIZE / sector) - (METADATA_SIZE_BYTES / sector)) < p2_start {
+    if (userdata2_start_lba + (USERDATA_MIN_SIZE / sector) + back_min_size_sector) > end_lba {
         panic!("Error: no enough space for userdata2");
     };
     //userdata1
+    let mut userdata1_end = p1_end - back_min_size_sector;
+    alignment_partition(&mut userdata1_start_lba, &mut userdata1_end, 2, true);
     let userdata1 = PartitionRawTarget {
         part_name: USERDATA_NAME.to_string(),
-        driver: get_userdata_driver(),
+        driver: target_disk.to_string(),
         start_lba: userdata1_start_lba,
-        end_lba: p1_end - back_min_size_sector,
+        end_lba: userdata1_end,
     };
-    let mut map1 = HashMap::new();
+    let mut backup1_start = userdata1_end + 1;
     map1.insert(USERDATA_NAME.to_string(), userdata1);
     let slot1: Slot = Slot {
         slot_name: "a".to_string(),
         backup_type_code: BackupType::type2code(backup_type.clone()),
         backup_target: backup_target.clone(),
         backup_exclude_list: exclude_files.clone(),
-        backup_target_start: p1_end - back_min_size_sector + 1,
+        backup_target_start: backup1_start,
         backup_target_end: p1_end,
         backup_target_attr: "".to_string(),
         dyn_partition_set: map1,
     };
     //userdata2
+    let mut userdata2_end = end_lba - back_min_size_sector;
+    alignment_partition(&mut userdata2_start_lba, &mut userdata2_end, 2, true);
     let userdata2 = PartitionRawTarget {
         part_name: USERDATA_NAME.to_string(),
-        driver: get_userdata_driver(),
+        driver: target_disk.to_string(),
         start_lba: userdata2_start_lba,
-        end_lba: end_lba - back_min_size_sector,
+        end_lba: userdata2_end,
     };
-    let mut map2 = HashMap::new();
+    let mut backup2_start = userdata2_end + 1;
     map2.insert(USERDATA_NAME.to_string(), userdata2);
     let slot2: Slot = Slot {
         slot_name: "b".to_string(),
         backup_type_code: BackupType::type2code(backup_type),
         backup_target,
         backup_exclude_list: exclude_files,
-        backup_target_start: end_lba - back_min_size_sector + 1,
+        backup_target_start: backup2_start,
         backup_target_end: end_lba,
         backup_target_attr: "".to_string(),
         dyn_partition_set: map2,
