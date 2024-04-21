@@ -436,3 +436,21 @@ pub fn get_disk_part_boundary_alignment(disk: &str) -> u32 {
     let log_size: u32 = size_str.trim().parse().expect("Error parsing size");
     phy_size / log_size
 }
+
+/// delete partition by name
+/// panic if unsupported sector size
+pub fn delete_part_by_name(part_name:&str) -> Result<(), &'static str> {
+    let (main_driver,id,_,_,sector_bytes)=get_part_accelerate_location(part_name)?;
+    //delete partition
+    let mut sector=LogicalBlockSize::Lb512;
+    if sector_bytes == 4096 {
+        sector = LogicalBlockSize::Lb4096;
+    } else if sector_bytes == 512 {} else {
+        panic!("Error: unsupported sector size !!!");
+    };
+    let gptcfg = GptConfig::new().writable(true).logical_block_size(sector.clone());
+    let mut disk = gptcfg.open(&main_driver).map_err(|_| "Error: open disk failed")?;
+    disk.remove_partition(id).ok_or_else(|| "Error: remove partition failed")?;
+    disk.write().map_err(|_| "Error: write disk failed")?;
+    Ok(())
+}
