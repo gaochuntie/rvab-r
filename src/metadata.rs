@@ -13,6 +13,7 @@ use std::os::unix::fs::FileExt;
 use crc32fast::Hasher;
 use toml::to_string as toml_to_string;
 use std::string::String as std_string;
+use uuid::Uuid;
 use crate::backup_factory::BackupType;
 use crate::constants::{get_block_dev_dir, METADATA_HEAD_MAGIC, METADATA_PARTITION_NAME, METADATA_TAIL_MAGIC, USERDATA_NAME};
 use crate::gpt_helper::{get_disk_sector_size, get_part_accelerate_location, get_userdata_driver, is_disk_segment_used};
@@ -295,6 +296,8 @@ pub struct PartitionRawTarget {
     pub driver: String,
     pub start_lba: u64,
     pub end_lba: u64,
+    pub type_guid: String,
+    pub flags : u64
 }
 
 #[derive(Debug, Serialize, Deserialize)]

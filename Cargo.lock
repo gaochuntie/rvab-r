@@ -94,9 +94,9 @@ dependencies = [
 
 [[package]]
 name = "gpt"
-version = "4.0.0-rc.1"
+version = "4.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "902a929d8ab16db335c70ca11f5a8dc1dc1bc0126fbde517bd9098916ea8c7db"
+checksum = "94039daf850fd835e0c4891317978feea3e5a9d5cb7aaa073a8d6d2123b43e1b"
 dependencies = [
  "bitflags",
  "crc",
@@ -125,6 +125,12 @@ name = "libc"
 version = "0.2.153"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
+
+[[package]]
+name = "log"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "memchr"
@@ -169,9 +175,11 @@ dependencies = [
  "argh",
  "crc32fast",
  "gpt",
+ "log",
  "nix",
  "serde",
  "toml",
+ "uuid",
 ]
 
 [[package]]

@@ -15,10 +15,11 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use gpt::disk::LogicalBlockSize;
+use gpt::GptConfig;
 use constants::*;
 use gpt_helper::get_userdata_driver;
 use crate::backup_factory::BackupType;
-use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, calculate_firmware_size, get_disk_sector_size};
+use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, calculate_firmware_size, delete_part_by_name, get_disk_sector_size, get_gpt_disk, get_part_accelerate_location, try_get_disk_lba};
 use crate::math_support::Interval;
 use crate::metadata::{Metadata, Slot, SlotsTomlConfig};
 
@@ -122,7 +123,24 @@ pub fn try_init_partition_table_layout(cfg_path:&String, initial_slot: &Option<S
     }else{
         target_slot=slots.get(0).expect("Error: no slot found");
     }
-    // TODO
+    // part tables backup , store orig part table in ram
+    let mut tables_backup=HashMap::new();
+    for (part_name, raw_part) in &target_slot.dyn_partition_set {
+        // store orig part table in ram
+        let disk_ret = get_gpt_disk(&raw_part.driver, false).expect("Error: get disk failed");
+        tables_backup.insert(raw_part.driver.clone(),disk_ret);
+        let (driver2,id,_,_,_) = get_part_accelerate_location(part_name)
+            .expect("Error: get part accelerate location failed");
+        let disk_ret = get_gpt_disk(&driver2, false).expect("Error: get disk failed");
+        tables_backup.insert(driver2.clone(),disk_ret);
+    };
+    // move to the target slot
+    for (part_name, raw_part) in &target_slot.dyn_partition_set {
+        //delete part
+        delete_part_by_name(part_name).unwrap();
+        //create part
+
+    };
     Ok(())
 }
 
@@ -177,7 +195,7 @@ pub fn list_slots(slot_name: Option<String>, only_name: bool) {
     println!("{}", metadata);
 }
 
-///
+/// dump current metadata to a config file
 pub fn dump_current_metadata(path: &str) {
     let metadata = Metadata::from_fw_metadata().unwrap();
     //convert slot toml
