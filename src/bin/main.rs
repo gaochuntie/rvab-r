@@ -8,6 +8,9 @@ use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template
 /// manage <real> virtual A/B/C/D... slots for Android devices
 /// yes,these slots is not those slots
 struct CmdProg {
+    #[argh(switch, short = 's')]
+    /// silent mode, allow all dangerous actions
+    silent: bool,
     #[argh(subcommand)]
     /// subcommand
     mode: Mode,
@@ -147,10 +150,9 @@ fn main() {
                 return;
             }
             if let Some(config) = init.config {
-                let ret = try_init_partition_table_layout(&config, &init.slot, true);
+                let ret = try_init_partition_table_layout(&config, &init.slot, true,args.silent);
                 if ret.is_err() {
                     eprintln!("Init failed {}", ret.err().unwrap());
-                    //,try restoring gpt partition table...
                 }
                 return;
             }

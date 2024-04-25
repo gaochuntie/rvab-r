@@ -223,6 +223,7 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
         start_lba: userdata2_start_lba,
         end_lba: userdata2_end,
         type_guid:type_guid.clone(),
+
         flags,
     };
     let mut backup2_start = userdata2_end + 1;

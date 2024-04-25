@@ -15,7 +15,8 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use gpt::disk::LogicalBlockSize;
-use gpt::GptConfig;
+use gpt::{GptConfig, partition};
+use log::debug;
 use constants::*;
 use gpt_helper::get_userdata_driver;
 use crate::backup_factory::BackupType;
@@ -53,7 +54,7 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
     let (start_lba, end_lba) = gpt_helper::find_max_free_tuple(&disk.find_free_sectors());
     println!("Find largest available space from {}*{} to {}*{} byte", start_lba, sector.as_u64(), end_lba, sector.as_u64());
 
-    let (slot1, slot2) = auto_layout_freespace_example(&userdata_driver,start_lba, end_lba, sector.as_u64(), &ex_back_fpath, &dual_list, &mut back_min_size_sector);
+    let (slot1, slot2) = auto_layout_freespace_example(&userdata_driver, start_lba, end_lba, sector.as_u64(), &ex_back_fpath, &dual_list, &mut back_min_size_sector);
     let config = SlotsTomlConfig { slot: vec![slot1, slot2] };
     let toml = toml::to_string(&config).unwrap();
 
@@ -94,55 +95,133 @@ pub fn check_slots_config(path: &str) {
         if size_bytes > backup_target_size {
             println!("\t1 Error: firmware size {} bytes is larger than backup target size {} bytes , {} > {}",
                      size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
-        }else{
+        } else {
             println!("\t1 Pass: firmware size {} bytes is smaller than backup target size {} bytes , {} < {}",
                      size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
         }
 
         // 2 check overlaps and is anything overflows disk size
-        let ret = try_init_partition_table_layout(&path.to_string(), &Some(slot.slot_name.clone()), false);
+        let ret = try_init_partition_table_layout(&path.to_string(), &Some(slot.slot_name.clone()), false, true);
         if ret.is_err() {
             eprintln!("\t2 {}", ret.err().unwrap());
-        }else{
+        } else {
             println!("\t2 Pass: no overlaps and no overflow disk size");
         }
         //TODO feather check
     }
-
-
 }
 
 /// Try init partition table layout
-pub fn try_init_partition_table_layout(cfg_path:&String, initial_slot: &Option<String>, save_changes: bool) -> Result<(), &'static str> {
+/// this is the cache version of init_partition_table_layout
+pub fn try_init_partition_table_layout(cfg_path: &String, initial_slot: &Option<String>, save_changes: bool, silent: bool) -> Result<(), &'static str> {
+    //print silent warning if silent mode enabled
+    if silent {
+        println!("Warning: silent mode enabled, allow all dangerous actions");
+    }
     let data = fs::read_to_string(cfg_path).expect("Error: read config file failed");
     let slots_config: SlotsTomlConfig = toml::from_str(&data).expect("Error: parse config file failed");
     let slots = &slots_config.slot;
     let mut target_slot;
-    if let Some(init_target)=initial_slot{
+    if let Some(init_target) = initial_slot {
         target_slot = slots.iter().find(|&x| x.slot_name == *init_target).expect("Error: no such slot found");
-    }else{
-        target_slot=slots.get(0).expect("Error: no slot found");
+    } else {
+        target_slot = slots.get(0).expect("Error: no slot found");
     }
     // part tables backup , store orig part table in ram
-    let mut tables_backup=HashMap::new();
-    for (part_name, raw_part) in &target_slot.dyn_partition_set {
-        // store orig part table in ram
-        let disk_ret = get_gpt_disk(&raw_part.driver, false).expect("Error: get disk failed");
-        tables_backup.insert(raw_part.driver.clone(),disk_ret);
-        let (driver2,id,_,_,_) = get_part_accelerate_location(part_name)
-            .expect("Error: get part accelerate location failed");
-        let disk_ret = get_gpt_disk(&driver2, false).expect("Error: get disk failed");
-        tables_backup.insert(driver2.clone(),disk_ret);
-    };
-    // move to the target slot
-    for (part_name, raw_part) in &target_slot.dyn_partition_set {
-        //delete part
-        delete_part_by_name(part_name).unwrap();
-        //create part
+    let mut tables_backup = HashMap::new();
+    if save_changes {
+        for (part_name, raw_part) in &target_slot.dyn_partition_set {
+            // store orig part table in ram
+            let disk_ret = get_gpt_disk(&raw_part.driver, false).expect("Error: get disk failed");
+            tables_backup.insert(raw_part.driver.clone(), disk_ret);
+            let (driver2, id, _, _, _) = get_part_accelerate_location(part_name)
+                .expect("Error: get part accelerate location failed");
+            let disk_ret = get_gpt_disk(&driver2, false).expect("Error: get disk failed");
+            tables_backup.insert(driver2.clone(), disk_ret);
+            debug!("Backup part table for part {} on disk {}", part_name, raw_part.driver);
+        };
+    }
 
+    // move to the target slot
+    let move_ret = init_partition_table_layout(target_slot, save_changes, silent);
+    if move_ret.is_err() {
+        // restore all changed tables
+        println!("Error: init partition table layout failed, restoring all changed tables");
+        for (driver, disk) in tables_backup {
+            let ret=disk.write();
+            if ret.is_err() {
+                println!("Error: restore disk {} failed", driver);
+            };
+        }
+        return Err("Error: init partition table layout failed");
     };
     Ok(())
 }
+
+/// init partition table layout
+/// ## Never panics
+pub fn init_partition_table_layout(target_slot: &Slot, save_changes: bool, silent: bool) -> Result<(), &'static str> {
+    // move to the target slot
+    for (part_name, raw_part) in &target_slot.dyn_partition_set {
+        debug!("Init part table for part {} on {}", part_name, raw_part.driver);
+        //delete part
+        delete_part_by_name(part_name)?;
+        //create part
+        let disk = raw_part.driver.clone();
+        let mut gptcfg = gpt::GptConfig::new().writable(true).logical_block_size(try_get_disk_lba(&disk)).change_partition_count(true);
+        let mut disk = gptcfg.open(&disk).map_err(|_| "Error: open disk failed")?;
+        let partition_id = disk
+            .find_next_partition_id()
+            .unwrap_or_else(|| {
+                println!("Warning: no free partition id found, will increase partition number");
+                if !silent {
+                    //ask if process
+                    let mut input = String::new();
+                    if save_changes {
+                        println!("Warning: We have cached all target gpt tables in ram");
+                        println!("Enter n will restore all gpt table to original state");
+                    };
+
+                    println!("Do you want to continue ? (y/n)");
+                    let ret=std::io::stdin().read_line(&mut input);
+                    if ret.is_err() {
+                        println!("Std Error: read input failed, auto enter n");
+                        return 0;
+                    };
+                    if input.trim() != "y" || input.trim() != "Y" {
+                        // give an impossible id to stop process
+                        return 0;
+                    };
+                };
+                disk.header().num_parts + 1
+            });
+        if partition_id == 0 {
+            return Err("Error: user cancel process");
+        };
+        let orig_part_num = disk.header().num_parts;
+        let mut partitions = disk.take_partitions();
+        let part_type = gpt::partition_types::Type::from_name(&raw_part.type_guid.clone()).map_err(|_| "Error: invalid part type guid")?;
+        let part = partition::Partition {
+            part_type_guid: part_type,
+            part_guid: uuid::Uuid::new_v4(),
+            first_lba: raw_part.start_lba,
+            last_lba: raw_part.end_lba,
+            flags: raw_part.flags,
+            name: part_name.to_string(),
+        };
+        partitions.insert(partition_id, part);
+        disk.update_partitions(partitions).map_err(|_| "Error: update partitions failed")?;
+        let new_part_num = disk.header().num_parts;
+        if new_part_num != orig_part_num {
+            println!("Warning: partition limits changed from {} to {}", orig_part_num, new_part_num);
+        };
+        if save_changes {
+            disk.write().map_err(|_| "Error: write disk failed")?;
+        };
+    };
+    Ok(())
+}
+
 
 /// update config to all slots
 pub fn update_config_to_all_slots(path: &str) {
