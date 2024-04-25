@@ -154,6 +154,7 @@ fn main() {
                 if ret.is_err() {
                     eprintln!("Init failed {}", ret.err().unwrap());
                 }
+                println!("Done , please keep your config , reboot to run install mode");
                 return;
             }
             println!("Option required");

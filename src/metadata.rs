@@ -258,9 +258,6 @@ impl Metadata {
 pub struct Slot {
     pub slot_name: String,
     pub backup_type_code: i32,
-    // pub userdata_driver: String,
-    // pub userdata_start_lba: u64,
-    // pub userdata_end_lba: u64,
     pub backup_target: String,
     pub backup_exclude_list: HashSet<String>,
     pub backup_target_start: u64,

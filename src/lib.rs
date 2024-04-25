@@ -38,7 +38,6 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
     } else if sector_size == 512 {} else {
         panic!("Error: unsupported sector size !!!")
     };
-
     let mut gpt_cfg = gpt::GptConfig::new().writable(false).logical_block_size(sector.clone());
     let mut disk_result = gpt_cfg.open(&userdata_driver);
     ///panic if disk open failed
@@ -49,6 +48,9 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
             userdata_id = *id;
         }
     }
+    if userdata_id == 0 {
+        panic!("Error: no userdata partition found");
+    };
     disk.remove_partition(userdata_id).expect("remove partition failed");
     //find the largest free space
     let (start_lba, end_lba) = gpt_helper::find_max_free_tuple(&disk.find_free_sectors());
@@ -109,13 +111,14 @@ pub fn check_slots_config(path: &str) {
         }
         //TODO feather check
     }
+    println!("Check done");
 }
 
 /// Try init partition table layout
 /// this is the cache version of init_partition_table_layout
 pub fn try_init_partition_table_layout(cfg_path: &String, initial_slot: &Option<String>, save_changes: bool, silent: bool) -> Result<(), &'static str> {
     //print silent warning if silent mode enabled
-    if silent {
+    if silent && save_changes {
         println!("Warning: silent mode enabled, allow all dangerous actions");
     }
     let data = fs::read_to_string(cfg_path).expect("Error: read config file failed");
@@ -165,6 +168,7 @@ pub fn init_partition_table_layout(target_slot: &Slot, save_changes: bool, silen
     for (part_name, raw_part) in &target_slot.dyn_partition_set {
         debug!("Init part table for part {} on {}", part_name, raw_part.driver);
         //delete part
+        //TODO BIG fuck bug
         delete_part_by_name(part_name)?;
         //create part
         let disk = raw_part.driver.clone();

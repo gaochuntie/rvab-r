@@ -179,7 +179,7 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     alignment_partition(&mut userdata2_start_lba, &mut 0, 2, false);
     p2_used_pointer = userdata2_start_lba;
 
-    let backup_target = "none".to_string();
+    let backup_target = target_disk.to_string();
     ///test space layout is correct for partition backup and binaryspace backup and losetup backup
     if back_min_size_sector > p2_size {
         panic!("Error: no enough space for backup target {}", bytes2ieee(back_min_size_sector * sector));
@@ -282,7 +282,7 @@ pub fn calculate_firmware_size(ex_back_list: &HashSet<String>) -> (u64, u64) {
     if firmware_size == 0 {
         panic!("Error: firmware size=0");
     }
-    println!("firmware_size:{}", bytes2ieee(firmware_size));
+    println!("firmware_size:{} , {}",firmware_size, bytes2ieee(firmware_size));
     (total_num, firmware_size)
 }
 
