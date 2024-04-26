@@ -55,13 +55,16 @@ impl BackupType {
     pub fn guess_backup_target_partition_size(&self,firmware_size_b: u64) -> u64 {
         match self {
             BackupType::Partition => {
-                firmware_size_b*(1.1) as u64
+                let add_on=firmware_size_b/10;
+                firmware_size_b+add_on
             }
             BackupType::BinarySpace => {
-                firmware_size_b*(1.1) as u64
+                let add_on=firmware_size_b/10;
+                firmware_size_b+add_on
             }
             BackupType::Losetup => {
-                firmware_size_b*(1.1) as u64
+                let add_on=firmware_size_b/10;
+                firmware_size_b+add_on
             }
         }
     }

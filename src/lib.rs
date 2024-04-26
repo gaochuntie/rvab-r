@@ -82,6 +82,7 @@ pub fn check_slots_config(path: &str) {
     let data = fs::read_to_string(path).expect("Error: read config file failed");
     let slots_config: SlotsTomlConfig = toml::from_str(&data).expect("Error: parse config file failed");
     let slots = &slots_config.slot;
+    let mut all_fine = true;
     for slot in slots.iter() {
         println!("Checking for slot : {}", &slot.slot_name);
         // 1 first check fw size
@@ -97,6 +98,7 @@ pub fn check_slots_config(path: &str) {
         if size_bytes > backup_target_size {
             println!("\t1 Error: firmware size {} bytes is larger than backup target size {} bytes , {} > {}",
                      size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
+            all_fine = false;
         } else {
             println!("\t1 Pass: firmware size {} bytes is smaller than backup target size {} bytes , {} < {}",
                      size_bytes, backup_target_size, bytes2ieee(size_bytes), bytes2ieee(backup_target_size));
@@ -106,12 +108,17 @@ pub fn check_slots_config(path: &str) {
         let ret = try_init_partition_table_layout(&path.to_string(), &Some(slot.slot_name.clone()), false, true);
         if ret.is_err() {
             eprintln!("\t2 {}", ret.err().unwrap());
+            all_fine = false;
         } else {
             println!("\t2 Pass: no overlaps and no overflow disk size");
         }
         //TODO feather check
     }
-    println!("Check done");
+    if !all_fine {
+        println!("##### FAIL #####");
+    } else {
+        println!("##### PASS #####");
+    };
 }
 
 /// Try init partition table layout
@@ -151,7 +158,7 @@ pub fn try_init_partition_table_layout(cfg_path: &String, initial_slot: &Option<
         // restore all changed tables
         println!("Error: init partition table layout failed, restoring all changed tables");
         for (driver, disk) in tables_backup {
-            let ret=disk.write();
+            let ret = disk.write();
             if ret.is_err() {
                 println!("Error: restore disk {} failed", driver);
             };
@@ -168,42 +175,65 @@ pub fn init_partition_table_layout(target_slot: &Slot, save_changes: bool, silen
     for (part_name, raw_part) in &target_slot.dyn_partition_set {
         debug!("Init part table for part {} on {}", part_name, raw_part.driver);
         //delete part
-        //TODO BIG fuck bug
-        delete_part_by_name(part_name)?;
+        if save_changes {
+            //normal init
+            delete_part_by_name(part_name)?;
+        };
         //create part
         let disk = raw_part.driver.clone();
         let mut gptcfg = gpt::GptConfig::new().writable(true).logical_block_size(try_get_disk_lba(&disk)).change_partition_count(true);
         let mut disk = gptcfg.open(&disk).map_err(|_| "Error: open disk failed")?;
-        let partition_id = disk
-            .find_next_partition_id()
-            .unwrap_or_else(|| {
-                println!("Warning: no free partition id found, will increase partition number");
-                if !silent {
-                    //ask if process
-                    let mut input = String::new();
-                    if save_changes {
-                        println!("Warning: We have cached all target gpt tables in ram");
-                        println!("Enter n will restore all gpt table to original state");
-                    };
 
-                    println!("Do you want to continue ? (y/n)");
-                    let ret=std::io::stdin().read_line(&mut input);
-                    if ret.is_err() {
-                        println!("Std Error: read input failed, auto enter n");
-                        return 0;
-                    };
-                    if input.trim() != "y" || input.trim() != "Y" {
-                        // give an impossible id to stop process
-                        return 0;
-                    };
+        let mut partition_id = 0;
+
+        if !save_changes {
+            // handle only check init (remove same name partition if exists)
+            // because delete_part_by_name will actually delete the partition
+            for (id, part) in disk.partitions().iter() {
+                if part.name == *part_name {
+                    partition_id = *id;
+                }
+            }
+            if partition_id != 0 {
+                let ret = disk.remove_partition(partition_id);
+                if ret.is_none() {
+                    return Err("Error: remove partition failed");
                 };
-                disk.header().num_parts + 1
-            });
+            };
+        }
         if partition_id == 0 {
-            return Err("Error: user cancel process");
+            partition_id = disk
+                .find_next_partition_id()
+                .unwrap_or_else(|| {
+                    println!("Warning: no free partition id found, will increase partition number");
+                    if !silent {
+                        //ask if process
+                        let mut input = String::new();
+                        if save_changes {
+                            println!("Warning: We have cached all target gpt tables in ram");
+                            println!("Enter n will restore all gpt table to original state");
+                        };
+
+                        println!("Do you want to continue ? (y/n)");
+                        let ret = std::io::stdin().read_line(&mut input);
+                        if ret.is_err() {
+                            println!("Std Error: read input failed, auto enter n");
+                            return 0;
+                        };
+                        if input.trim() != "y" || input.trim() != "Y" {
+                            // give an impossible id to stop process
+                            return 0;
+                        };
+                    };
+                    disk.header().num_parts + 1
+                });
+        }
+        if partition_id == 0 {
+            return Err("Error: user cancel process : invalid partition id");
         };
         let orig_part_num = disk.header().num_parts;
         let mut partitions = disk.take_partitions();
+
         let part_type = gpt::partition_types::Type::from_name(&raw_part.type_guid.clone()).map_err(|_| "Error: invalid part type guid")?;
         let part = partition::Partition {
             part_type_guid: part_type,
