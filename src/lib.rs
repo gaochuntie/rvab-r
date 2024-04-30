@@ -9,6 +9,7 @@ mod backup_partition;
 mod backup_ftp;
 mod config_helper;
 mod math_support;
+mod bootctrl;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -63,8 +64,8 @@ pub fn generate_template_init_config_file(path: PathBuf, ex_back_fpath: Option<S
     let mut file = std::fs::File::create(path)?;
     file.write_all(b"# DO NOT MODIFY BACKUP TARGET MIN SIZE , IT IS ONLY A INFO FOR YOU WITHOUT ANY OTHER FUNCTION\n");
     file.write_all(b"# DO NOT RESTORE SUPER IF ON SYSTEM\n");
-    file.write_all(b"# Firmware too large ? add your custorm partitions to backup exclude list and  go on to check step \n");
-    file.write_all(b"# On-system switch please make super or system and vender .etc to dual \n");
+    file.write_all(b"# Firmware too large ? add your custorm partitions to backup exclude list and regenerate \n");
+    file.write_all(b"# On-system switch please make super or system and vender .etc to dynpt list \n");
     file.write_all(b"# On-recovery switch is safe if umounted everything \n\n");
     let backup_target_min_size_note = format!("# NOTE : Backup Target Min SIZE = {} bytes , {}\n",
                                               back_min_size_sector * sector.as_u64(),
@@ -119,6 +120,80 @@ pub fn check_slots_config(path: &str) {
     } else {
         println!("##### PASS #####");
     };
+}
+
+/// Try only init userdata partition
+/// ## Panic if any error occurs
+pub fn try_init_userdata_partition(cfg_path: &String, initial_slot: &Option<String>, silent: bool) -> Result<(), ()> {
+    //print silent warning if silent mode enabled
+    if silent {
+        println!("Warning: silent mode enabled, allow all dangerous actions");
+    }
+    let data = fs::read_to_string(cfg_path).expect("Error: read config file failed");
+    let slots_config: SlotsTomlConfig = toml::from_str(&data).expect("Error: parse config file failed");
+    let slots = &slots_config.slot;
+    let mut target_slot;
+    if let Some(init_target) = initial_slot {
+        target_slot = slots.iter().find(|&x| x.slot_name == *init_target).expect("Error: no such slot found");
+    } else {
+        target_slot = slots.get(0).expect("Error: no slot found");
+    }
+    let userdata_driver = get_userdata_driver();
+    if let Some(userdata_raw) = target_slot.dyn_partition_set.get(USERDATA_NAME) {
+        if userdata_driver == userdata_raw.driver {
+            // delete userdata and recreate
+            let disk = get_gpt_disk(&userdata_driver, true);
+            if disk.is_none() {
+                eprintln!("Error: get disk failed");
+                return Err(());
+            }
+            let mut disk = disk.unwrap();
+            let userdata_id = disk.partitions().iter().find(|(_, part)| part.name == USERDATA_NAME).map(|(id, _)| *id);
+            if userdata_id.is_none() {
+                eprintln!("Error: find userdata partition failed");
+                return Err(());
+            }
+            let userdata_id = userdata_id.unwrap();
+            let ret = disk.remove_partition(userdata_id);
+            if ret.is_none() {
+                eprintln!("Error: remove userdata partition failed");
+                return Err(());
+            }
+            let part_type = gpt::partition_types::Type::from_name(&userdata_raw.type_guid.clone());
+            if part_type.is_err() {
+                eprintln!("Error: invalid part type guid");
+                return Err(());
+            }
+            let part_type = part_type.unwrap();
+            let part = partition::Partition {
+                part_type_guid: part_type,
+                part_guid: uuid::Uuid::new_v4(),
+                first_lba: userdata_raw.start_lba,
+                last_lba: userdata_raw.end_lba,
+                flags: userdata_raw.flags,
+                name: USERDATA_NAME.to_string(),
+            };
+            let mut partitions = disk.take_partitions();
+            partitions.insert(userdata_id, part);
+            let ret = disk.update_partitions(partitions);
+            if ret.is_err() {
+                eprintln!("Error: update partitions failed");
+                return Err(());
+            }
+            let ret = disk.write();
+            if ret.is_err() {
+                eprintln!("Error: write disk failed");
+                return Err(());
+            }
+        } else {
+            eprintln!("Error: config userdata mismatch {}<>{}", userdata_driver, userdata_raw.driver);
+            return Err(());
+        }
+    } else {
+        eprintln!("Error: no userdata partition found in config");
+        return Err(());
+    }
+    Ok(())
 }
 
 /// Try init partition table layout

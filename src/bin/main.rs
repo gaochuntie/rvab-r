@@ -1,7 +1,7 @@
 use std::fs;
 use std::thread::current;
 use argh::FromArgs;
-use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, try_init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots};
+use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, try_init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots, try_init_userdata_partition};
 
 #[derive(FromArgs)]
 /// rvab command line multi call tool,
@@ -30,17 +30,22 @@ enum Mode {
 #[derive(FromArgs)]
 #[argh(subcommand,
 name = "init",
-description = "set necessary gpt layout: move and resize userdata,\
-blank 64mib before each userdata partition,and free up space for backup and other slots. \
-Use -o <output file> to generate a template config file",
+description = "Use -o <output file> to generate a template config file. \
+Use -c <config> to check and test config file without modify disk. \
+Use -f <config> to init userdata partition then. \
+Use -full <config> to init and sync all partitions except userdata",
 example = "rvab init -f <config> ",
 example = "rvab init -f <config> --slot a",
+example = "rvab init -full <config> ",
 )]
 /// set necessary gpt layout
 struct InitMode {
-    /// config file for init
+    /// config file for userdata init
     #[argh(option, short = 'f')]
     config: Option<String>,
+    /// config file for full init
+    #[argh(option)]
+    full: Option<String>,
     /// which slot do you want to be the first slot , default is the first slot in config file
     #[argh(option)]
     slot: Option<String>,
@@ -149,7 +154,15 @@ fn main() {
                 check_slots_config(&check);
                 return;
             }
+            //only init userdata
             if let Some(config) = init.config {
+                let ret = try_init_userdata_partition(&config, &init.slot,args.silent);
+                if ret.is_err() {
+                    eprintln!("Init failed ");
+                }
+                return;
+            }
+            if let Some(config) = init.full {
                 let ret = try_init_partition_table_layout(&config, &init.slot, true,args.silent);
                 if ret.is_err() {
                     eprintln!("Init failed {}", ret.err().unwrap());
