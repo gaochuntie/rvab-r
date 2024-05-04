@@ -33,7 +33,7 @@ name = "init",
 description = "Use -o <output file> to generate a template config file. \
 Use -c <config> to check and test config file without modify disk. \
 Use -f <config> to init userdata partition then. \
-Use -full <config> to init and sync all partitions except userdata",
+Use -full <config> to init and sync(clone) all dyn partitions except userdata",
 example = "rvab init -f <config> ",
 example = "rvab init -f <config> --slot a",
 example = "rvab init -full <config> ",

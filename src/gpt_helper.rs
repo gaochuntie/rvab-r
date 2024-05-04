@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::{fs, io};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use gpt::{disk, GptDisk};
 use gpt::GptConfig;
@@ -579,4 +580,34 @@ pub fn new_partition(
 
     //given segment is illegal
     Err(gpt::GptError::NotEnoughSpace)
+}
+
+/// clone disk segment , in bytes
+/// will check
+pub fn clone_disk_segment(sdisk: &str, soffset: u64, slength: u64, tdisk: &str, toffset: u64, tlength: u64,allow_override_part:bool)->Result<(),()>{
+    if slength != tlength {
+        return Err(())
+    };
+    let tsector = get_disk_sector_size(tdisk);
+    let tstart_lba = toffset / tsector;
+    let tend_lba = (toffset + tlength-1+tsector) / tsector;
+    let override_list = is_disk_segment_used(tdisk, tstart_lba, tend_lba);
+    if override_list.is_some() && !allow_override_part {
+        return Err(())
+    };
+    let sfile = fs::OpenOptions::new().read(true).open(sdisk)?;
+    let tfile = fs::OpenOptions::new().write(true).open(tdisk)?;
+    let mut sfile = io::BufReader::new(sfile);
+    let mut tfile = io::BufWriter::new(tfile);
+    sfile.seek(io::SeekFrom::Start(soffset))?;
+    tfile.seek(io::SeekFrom::Start(toffset))?;
+    let mut buffer = vec![0; 4096];
+    let mut remain = slength;
+    while remain > 0 {
+        let read_size = if remain > 4096 { 4096 } else { remain as usize };
+        sfile.read_exact(&mut buffer[..read_size])?;
+        tfile.write_all(&buffer[..read_size])?;
+        remain -= read_size as u64;
+    }
+    Ok(())
 }
