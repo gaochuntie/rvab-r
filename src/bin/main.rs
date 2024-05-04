@@ -1,6 +1,11 @@
-use std::fs;
+use std::{fs, thread};
+use std::cmp::min;
+use std::fmt::Write;
 use std::thread::current;
+use std::time::Duration;
 use argh::FromArgs;
+use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
+use rand::Rng;
 use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, try_init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots, try_init_userdata_partition};
 
 #[derive(FromArgs)]
@@ -25,6 +30,7 @@ enum Mode {
     List(ListMode),
     Current(Current),
     Archive(ArchiveMode),
+    Test(TestMode),
 }
 
 #[derive(FromArgs)]
@@ -140,6 +146,10 @@ struct ArchiveMode {
     gpt: bool,
 }
 
+#[derive(FromArgs)]
+#[argh(subcommand, name = "test")]
+/// test mode
+struct TestMode {}
 fn main() {
     let args: CmdProg = argh::from_env();
     match args.mode {
@@ -209,6 +219,78 @@ fn main() {
         Mode::Archive(_) => {
             println!("Archive mode");
         }
+        Mode::Test(_) => {
+            println!("Test mode");
+            test_indicatif();
+        }
     }
+}
+
+pub fn test_indicatif(){
+    test_indicatif_multi();
+}
+pub fn test_indicatif_download(){
+    let mut downloaded = 0;
+    let total_size = 231231231;
+
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        .unwrap()
+        .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+        .progress_chars("#>-"));
+
+    while downloaded < total_size {
+        let new = min(downloaded + 223211, total_size);
+        downloaded = new;
+        pb.set_position(new);
+        thread::sleep(Duration::from_millis(12));
+    }
+
+    pb.finish_with_message("downloaded");
+}
+
+pub fn test_indicatif_multi() {
+    let m = MultiProgress::new();
+    let sty = ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        .unwrap()
+        .progress_chars("##-");
+
+    let n = 200;
+    let pb = m.add(ProgressBar::new(n));
+    pb.set_style(sty.clone());
+    pb.set_message("todo");
+    let pb2 = m.add(ProgressBar::new(n));
+    pb2.set_style(sty.clone());
+    pb2.set_message("finished");
+
+
+    m.println("starting!").unwrap();
+
+    let mut threads = vec![];
+
+    for i in 0..n {
+        thread::sleep(Duration::from_millis(15));
+        if i == n / 3 {
+            thread::sleep(Duration::from_secs(2));
+        }
+        pb.inc(1);
+        let m = m.clone();
+        let pb2 = pb2.clone();
+        threads.push(thread::spawn(move || {
+            let spinner = m.add(ProgressBar::new_spinner().with_message(i.to_string()));
+            spinner.enable_steady_tick(Duration::from_millis(100));
+            thread::sleep(
+                rand::thread_rng().gen_range(Duration::from_secs(1)..Duration::from_secs(5)),
+            );
+            pb2.inc(1);
+        }));
+    }
+    pb.finish_with_message("all jobs started");
+
+    for thread in threads {
+        let _ = thread.join();
+    }
+    pb2.finish_with_message("all jobs done");
+    m.clear().unwrap();
 }
 

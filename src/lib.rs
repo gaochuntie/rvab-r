@@ -11,17 +11,20 @@ mod config_helper;
 mod math_support;
 mod bootctrl;
 
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io::Write;
+use std::{fs, io, thread};
+use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 use gpt::disk::LogicalBlockSize;
 use gpt::{GptConfig, partition};
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use log::debug;
 use constants::*;
 use gpt_helper::get_userdata_driver;
 use crate::backup_factory::BackupType;
-use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, calculate_firmware_size, delete_part_by_name, get_disk_sector_size, get_gpt_disk, get_part_accelerate_location, try_get_disk_lba};
+use crate::gpt_helper::{auto_layout_freespace_example, bytes2ieee, calculate_firmware_size, delete_part_by_name, get_disk_sector_size, get_gpt_disk, get_part_accelerate_location, is_disk_segment_used, try_get_disk_lba};
 use crate::math_support::Interval;
 use crate::metadata::{Metadata, Slot, SlotsTomlConfig};
 
@@ -212,6 +215,16 @@ pub fn try_init_partition_table_layout(cfg_path: &String, initial_slot: &Option<
     } else {
         target_slot = slots.get(0).expect("Error: no slot found");
     }
+    // check if done first init
+    let target_userdata=target_slot.dyn_partition_set.get(USERDATA_NAME).unwrap();
+    let (_,_,start_lba,end_lba,_)=get_part_accelerate_location(USERDATA_NAME).unwrap();
+    if (target_userdata.start_lba != start_lba) || (target_userdata.end_lba != end_lba) {
+        eprintln!("Error: Please use -f to init userdata first and reboot to retry\
+        \nYou shouldn't skip the userdata init process and directly do the full init process\
+        \nSuch wrong operation may cause broken firmware and the result is totally unpredictable");
+        return Err("Error: userdata not initialized");
+    };
+
     // part tables backup , store orig part table in ram
     let mut tables_backup = HashMap::new();
     if save_changes {
@@ -229,17 +242,28 @@ pub fn try_init_partition_table_layout(cfg_path: &String, initial_slot: &Option<
 
     // move to the target slot
     let move_ret = init_partition_table_layout(target_slot, save_changes, silent);
-    if move_ret.is_err() {
+    // clone fw
+    let mut clone_success = false;
+    if move_ret.is_ok() {
+        let clone_ret = clone_firmware(slots);
+        if clone_ret.is_ok() {
+            clone_success = true;
+        } else {
+            println!("Error: clone firmware failed");
+        }
+    }
+    if move_ret.is_err() || !clone_success {
         // restore all changed tables
-        println!("Error: init partition table layout failed, restoring all changed tables");
+        println!("Error: init partition table layout failed or clone firmware failed, restoring all changed tables");
         for (driver, disk) in tables_backup {
             let ret = disk.write();
             if ret.is_err() {
-                println!("Error: restore disk {} failed", driver);
+                println!("Terrible!!!: restore disk {} failed", driver);
             };
         }
         return Err("Error: init partition table layout failed");
     };
+
     Ok(())
 }
 
@@ -331,6 +355,67 @@ pub fn init_partition_table_layout(target_slot: &Slot, save_changes: bool, silen
     Ok(())
 }
 
+/// clone firmware except userdata to all slots
+/// This is very important,if you switch to a slot with blank firmware partition,your device will be bricked
+/// for example,will a blank abl partition
+/// ## Never Panic
+pub fn clone_firmware(slots: &Vec<Slot>) -> Result<(), &'static str> {
+    let mut total_size: u64 = 0;
+    for slot in slots.iter() {
+        for (name, raw_part) in slot.dyn_partition_set.iter() {
+            if name == USERDATA_NAME {
+                continue;
+            }
+            let (_, _, first_lba, last_lba, sector_size) = get_part_accelerate_location(name)?;
+            let slength = (last_lba - first_lba + 1) * sector_size;
+            total_size += slength;
+        };
+    };
+    let mut cloned: u64 = 0;
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        .unwrap()
+        .with_key("eta", |state: &ProgressState, w: &mut dyn std::fmt::Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+        .progress_chars("#>-"));
+
+    for slot in slots.iter() {
+        for (name, raw_part) in slot.dyn_partition_set.iter() {
+            if name == USERDATA_NAME {
+                continue;
+            }
+            let (sdisk, _, first_lba, last_lba, sector_size) = get_part_accelerate_location(name)?;
+            let tdisk = &raw_part.driver;
+            let soffset = first_lba * sector_size;
+            let slength = (last_lba - first_lba + 1) * sector_size;
+            let tsector = get_disk_sector_size(&raw_part.driver);
+            let toffset = (raw_part.start_lba) * tsector;
+            let tlength = (raw_part.end_lba - raw_part.start_lba + 1) * tsector;
+            // clone
+            if slength != tlength {
+                return Err("Error: source and target length must be equal");
+            };
+            // no need to check,because check is already done previously
+            let sfile = fs::OpenOptions::new().read(true).open(sdisk).map_err(|_| "Error: open source disk failed")?;
+            let tfile = fs::OpenOptions::new().write(true).open(tdisk).map_err(|_| "Error: open target disk failed")?;
+            let mut sfile = io::BufReader::new(sfile);
+            let mut tfile = io::BufWriter::new(tfile);
+            sfile.seek(io::SeekFrom::Start(soffset)).map_err(|_| "Error: seek source disk failed")?;
+            tfile.seek(io::SeekFrom::Start(toffset)).map_err(|_| "Error: seek target disk failed")?;
+            let mut buffer = vec![0; 4096];
+            let mut remain = slength;
+            while remain > 0 {
+                let read_size = if remain > 4096 { 4096 } else { remain as usize };
+                sfile.read_exact(&mut buffer[..read_size]).map_err(|_| "Error: read source disk failed")?;
+                tfile.write_all(&buffer[..read_size]).map_err(|_| "Error: write target disk failed")?;
+                cloned += read_size as u64;
+                pb.inc(read_size as u64);
+                remain -= read_size as u64;
+            }
+        };
+    };
+    pb.finish_with_message("clone finished");
+    Ok(())
+}
 
 /// update config to all slots
 pub fn update_config_to_all_slots(path: &str) {

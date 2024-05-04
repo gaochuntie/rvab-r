@@ -584,29 +584,29 @@ pub fn new_partition(
 
 /// clone disk segment , in bytes
 /// will check
-pub fn clone_disk_segment(sdisk: &str, soffset: u64, slength: u64, tdisk: &str, toffset: u64, tlength: u64,allow_override_part:bool)->Result<(),()>{
+pub fn clone_disk_segment(sdisk: &str, soffset: u64, slength: u64, tdisk: &str, toffset: u64, tlength: u64,allow_override_part:bool)->Result<(),&'static str>{
     if slength != tlength {
-        return Err(())
+        return Err("Error: source and target length must be equal")
     };
     let tsector = get_disk_sector_size(tdisk);
     let tstart_lba = toffset / tsector;
     let tend_lba = (toffset + tlength-1+tsector) / tsector;
     let override_list = is_disk_segment_used(tdisk, tstart_lba, tend_lba);
     if override_list.is_some() && !allow_override_part {
-        return Err(())
+        return Err("Error: target segment is used by some partitions")
     };
-    let sfile = fs::OpenOptions::new().read(true).open(sdisk)?;
-    let tfile = fs::OpenOptions::new().write(true).open(tdisk)?;
+    let sfile = fs::OpenOptions::new().read(true).open(sdisk).map_err(|_| "Error: open source disk failed")?;
+    let tfile = fs::OpenOptions::new().write(true).open(tdisk).map_err(|_| "Error: open target disk failed")?;
     let mut sfile = io::BufReader::new(sfile);
     let mut tfile = io::BufWriter::new(tfile);
-    sfile.seek(io::SeekFrom::Start(soffset))?;
-    tfile.seek(io::SeekFrom::Start(toffset))?;
+    sfile.seek(io::SeekFrom::Start(soffset)).map_err(|_| "Error: seek source disk failed")?;
+    tfile.seek(io::SeekFrom::Start(toffset)).map_err(|_| "Error: seek target disk failed")?;
     let mut buffer = vec![0; 4096];
     let mut remain = slength;
     while remain > 0 {
         let read_size = if remain > 4096 { 4096 } else { remain as usize };
-        sfile.read_exact(&mut buffer[..read_size])?;
-        tfile.write_all(&buffer[..read_size])?;
+        sfile.read_exact(&mut buffer[..read_size]).map_err(|_| "Error: read source disk failed")?;
+        tfile.write_all(&buffer[..read_size]).map_err(|_| "Error: write target disk failed")?;
         remain -= read_size as u64;
     }
     Ok(())
