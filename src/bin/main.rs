@@ -1,12 +1,16 @@
-use std::{fs, thread};
+use argh::FromArgs;
+use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
+use librvab_cli_r::{
+    check_slots_config, dump_current_metadata, generate_template_init_config_file, list_slots,
+    show_current_slot, try_init_partition_table_layout, try_init_userdata_partition,
+    update_config_to_all_slots,
+};
+use rand::Rng;
 use std::cmp::min;
 use std::fmt::Write;
 use std::thread::current;
 use std::time::Duration;
-use argh::FromArgs;
-use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
-use rand::Rng;
-use librvab_cli_r::{check_slots_config, dump_current_metadata, generate_template_init_config_file, try_init_partition_table_layout, list_slots, show_current_slot, update_config_to_all_slots, try_init_userdata_partition};
+use std::{fs, thread};
 
 #[derive(FromArgs)]
 /// rvab command line multi call tool,
@@ -34,15 +38,16 @@ enum Mode {
 }
 
 #[derive(FromArgs)]
-#[argh(subcommand,
-name = "init",
-description = "Use -o <output file> to generate a template config file. \
+#[argh(
+    subcommand,
+    name = "init",
+    description = "Use -o <output file> to generate a template config file. \
 Use -c <config> to check and test config file without modify disk. \
 Use -f <config> to init userdata partition then. \
 Use -full <config> to init and sync(clone) all dyn partitions except userdata",
-example = "rvab init -f <config> ",
-example = "rvab init -f <config> --slot a",
-example = "rvab init -full <config> ",
+    example = "rvab init -f <config> ",
+    example = "rvab init -f <config> --slot a",
+    example = "rvab init -full <config> "
 )]
 /// set necessary gpt layout
 struct InitMode {
@@ -70,12 +75,13 @@ struct InitMode {
 }
 
 #[derive(FromArgs)]
-#[argh(subcommand,
-name = "install",
-description = "install(update) metadata for all slots (all slots' metadata must keep synced)",
-example = "rvab install -u <config>",
-example = "rvab install -t <output template file> --exclude <exclude list file> --dynpt <dyn partitions list file>",
-example = "rvab install -c <config>",
+#[argh(
+    subcommand,
+    name = "install",
+    description = "install(update) metadata for all slots (all slots' metadata must keep synced)",
+    example = "rvab install -u <config>",
+    example = "rvab install -t <output template file> --exclude <exclude list file> --dynpt <dyn partitions list file>",
+    example = "rvab install -c <config>"
 )]
 /// install(update) metadata for all slots
 struct InstallMode {
@@ -109,9 +115,7 @@ struct SwitchMode {
 }
 
 #[derive(FromArgs)]
-#[argh(subcommand,
-name = "list",
-example = "rvab list [slot]")]
+#[argh(subcommand, name = "list", example = "rvab list [slot]")]
 /// list all slots and metadata
 struct ListMode {
     /// target slot
@@ -157,7 +161,7 @@ fn main() {
             println!("Init mode");
             if let Some(out) = init.template {
                 let path = std::path::PathBuf::from(out);
-                generate_template_init_config_file(path,init.exclude,init.dynpt).unwrap();
+                generate_template_init_config_file(path, init.exclude, init.dynpt).unwrap();
                 return;
             }
             if let Some(check) = init.check {
@@ -166,14 +170,14 @@ fn main() {
             }
             //only init userdata
             if let Some(config) = init.config {
-                let ret = try_init_userdata_partition(&config, &init.slot,args.silent);
+                let ret = try_init_userdata_partition(&config, &init.slot, args.silent);
                 if ret.is_err() {
                     eprintln!("Init failed ");
                 }
                 return;
             }
             if let Some(config) = init.full {
-                let ret = try_init_partition_table_layout(&config, &init.slot, true,args.silent);
+                let ret = try_init_partition_table_layout(&config, &init.slot, true, args.silent);
                 if ret.is_err() {
                     eprintln!("Init failed {}", ret.err().unwrap());
                 }
@@ -187,7 +191,7 @@ fn main() {
             println!("Install mode");
             if let Some(out) = install.template {
                 let path = std::path::PathBuf::from(out);
-                generate_template_init_config_file(path,install.exclude,install.dynpt).unwrap();
+                generate_template_init_config_file(path, install.exclude, install.dynpt).unwrap();
                 return;
             }
             if let Some(check) = install.check {
@@ -226,10 +230,10 @@ fn main() {
     }
 }
 
-pub fn test_indicatif(){
+pub fn test_indicatif() {
     test_indicatif_multi();
 }
-pub fn test_indicatif_download(){
+pub fn test_indicatif_download() {
     let mut downloaded = 0;
     let total_size = 231231231;
 
@@ -263,7 +267,6 @@ pub fn test_indicatif_multi() {
     pb2.set_style(sty.clone());
     pb2.set_message("finished");
 
-
     m.println("starting!").unwrap();
 
     let mut threads = vec![];
@@ -293,4 +296,3 @@ pub fn test_indicatif_multi() {
     pb2.finish_with_message("all jobs done");
     m.clear().unwrap();
 }
-

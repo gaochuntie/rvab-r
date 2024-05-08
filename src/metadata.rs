@@ -4,19 +4,24 @@ use serde::{Deserialize, Serialize};
 //64MIB
 pub const METADATA_SIZE_BYTES: u64 = 1024 * 1024 * 64;
 
+use crate::backup_factory::BackupType;
+use crate::constants::{
+    get_block_dev_dir, METADATA_HEAD_MAGIC, METADATA_PARTITION_NAME, METADATA_TAIL_MAGIC,
+    USERDATA_NAME,
+};
+use crate::gpt_helper::{
+    get_disk_sector_size, get_part_accelerate_location, get_userdata_driver, is_disk_segment_used,
+};
+use crc32fast::Hasher;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::E;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
-use crc32fast::Hasher;
-use toml::to_string as toml_to_string;
 use std::string::String as std_string;
+use toml::to_string as toml_to_string;
 use uuid::Uuid;
-use crate::backup_factory::BackupType;
-use crate::constants::{get_block_dev_dir, METADATA_HEAD_MAGIC, METADATA_PARTITION_NAME, METADATA_TAIL_MAGIC, USERDATA_NAME};
-use crate::gpt_helper::{get_disk_sector_size, get_part_accelerate_location, get_userdata_driver, is_disk_segment_used};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Metadata {
@@ -27,7 +32,11 @@ pub struct Metadata {
 }
 impl fmt::Display for Metadata {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Is Dirty: {}\nCurrent Slot: {}\n\n", self.is_dirty, self.current_slot)?;
+        write!(
+            f,
+            "Is Dirty: {}\nCurrent Slot: {}\n\n",
+            self.is_dirty, self.current_slot
+        )?;
         for (_, slot) in &self.slots {
             write!(f, "{}\n", slot)?;
         }
@@ -61,7 +70,8 @@ impl Metadata {
     /// lazy match current slot (just match userdata)
     pub fn calculate_current_slot(&mut self) -> Option<String> {
         let mut current_slot = String::new();
-        let (driver, _, first_lba, last_lba, sector_size) = get_part_accelerate_location(USERDATA_NAME).unwrap_or(("".to_string(), 0, 0, 0, 0));
+        let (driver, _, first_lba, last_lba, sector_size) =
+            get_part_accelerate_location(USERDATA_NAME).unwrap_or(("".to_string(), 0, 0, 0, 0));
         if driver.is_empty() {
             return None;
         };
@@ -71,7 +81,10 @@ impl Metadata {
                 continue;
             };
             let userdata_target = userdata_target.unwrap();
-            if userdata_target.driver == driver && userdata_target.start_lba == first_lba && userdata_target.end_lba == last_lba {
+            if userdata_target.driver == driver
+                && userdata_target.start_lba == first_lba
+                && userdata_target.end_lba == last_lba
+            {
                 current_slot = slot_name.clone();
                 self.current_slot = current_slot.clone();
                 return Some(current_slot);
@@ -99,14 +112,18 @@ impl Metadata {
 
         //check head magic
         let mut magic_head_buffer = [0; METADATA_HEAD_MAGIC.as_bytes().len()];
-        let mut file = File::open(main_driver).map_err(|_| "Error: Failed to open metadata partition")?;
-        file.read_exact_at(&mut magic_head_buffer, offset).map_err(|_| "Error: Failed to read header")?;
+        let mut file =
+            File::open(main_driver).map_err(|_| "Error: Failed to open metadata partition")?;
+        file.read_exact_at(&mut magic_head_buffer, offset)
+            .map_err(|_| "Error: Failed to read header")?;
         if magic_head_buffer != METADATA_HEAD_MAGIC.as_bytes() {
             return Err("Error: metadata head magic not match");
         };
-        count+=magic_head_buffer.len() as u64;
+        count += magic_head_buffer.len() as u64;
         let mut reader = BufReader::new(&file);
-        reader.seek(SeekFrom::Start(offset + (magic_head_buffer.len() as u64))).map_err(|_| "Error: Failed to seek")?;
+        reader
+            .seek(SeekFrom::Start(offset + (magic_head_buffer.len() as u64)))
+            .map_err(|_| "Error: Failed to seek")?;
         for line in reader.lines() {
             if line.is_ok() {
                 let lin_str = line.unwrap();
@@ -119,10 +136,11 @@ impl Metadata {
             } else {
                 break;
             }
-        };
+        }
         //read crc32
         let mut crc32_buffer = [0; 4];
-        file.read_exact_at(&mut crc32_buffer, offset + length).map_err(|_| "Error: Failed to read crc32")?;
+        file.read_exact_at(&mut crc32_buffer, offset + length)
+            .map_err(|_| "Error: Failed to read crc32")?;
         //get crc32
         let crc32 = u32::from_le_bytes(crc32_buffer);
         //calculate string crc32
@@ -131,19 +149,23 @@ impl Metadata {
         let checksum = hasher.finalize();
         if checksum != crc32 {
             is_dirty = true;
-            println!("Warning: metadata crc32 not match,maybe metadata is dirty.\n\
-            Please update metadata using rvab instead of modify it manually\n");
+            println!(
+                "Warning: metadata crc32 not match,maybe metadata is dirty.\n\
+            Please update metadata using rvab instead of modify it manually\n"
+            );
             //ask if continue
             println!("Force use dirty metadata ? (Y/N) ");
             let mut input = String::new();
-            std::io::stdin().read_line(&mut input).expect("Error: Failed to read line");
+            std::io::stdin()
+                .read_line(&mut input)
+                .expect("Error: Failed to read line");
             if input.trim().to_uppercase() != "Y" {
                 panic!("Exit ...")
             };
-
         };
         //parse toml
-        let mut metadata: Metadata = toml::from_str(&toml_str).map_err(|_| "Failed to parse toml")?;
+        let mut metadata: Metadata =
+            toml::from_str(&toml_str).map_err(|_| "Failed to parse toml")?;
         metadata.is_dirty = is_dirty;
         metadata.calculate_current_slot();
         Ok(metadata)
@@ -154,7 +176,8 @@ impl Metadata {
         //warning : this field on disk is always false to avoid crc32 mess
         let is_dirty_backup = self.is_dirty;
         self.is_dirty = false;
-        let mut toml_str = toml_to_string(&self).map_err(|_| "Error: Failed to convert to toml str")?;
+        let mut toml_str =
+            toml_to_string(&self).map_err(|_| "Error: Failed to convert to toml str")?;
         //add \n to avoid read overflow
         toml_str.push('\n');
 
@@ -163,7 +186,6 @@ impl Metadata {
         hasher.update(toml_str.as_bytes());
         let checksum = hasher.finalize();
         let crc32_buffer = checksum.to_le_bytes();
-
 
         toml_str.push_str(METADATA_TAIL_MAGIC);
         toml_str.push('\n');
@@ -182,26 +204,36 @@ impl Metadata {
             //tail reserved 4 bytes for crc32
             let max_length = (end_lba - start_lba + 1) * sector_size - 4;
 
-
             //write head magic
             let magic_head_buffer = METADATA_HEAD_MAGIC.as_bytes();
-            let mut file = OpenOptions::new().write(true).open(main_driver).map_err(|_| "Error: Failed to open metadata partition")?;
-            file.write_all_at(&magic_head_buffer, offset).map_err(|_| "Error: Failed to write header")?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .open(main_driver)
+                .map_err(|_| "Error: Failed to open metadata partition")?;
+            file.write_all_at(&magic_head_buffer, offset)
+                .map_err(|_| "Error: Failed to write header")?;
 
             if (toml_str.as_str().len() + magic_head_buffer.len()) as u64 > max_length {
                 return Err("Error: metadata size overflow");
             };
-            file.write_all_at(toml_str.as_bytes(), offset + (magic_head_buffer.len() as u64)).map_err(|_| "Error: Failed to write to metadata partition")?;
+            file.write_all_at(
+                toml_str.as_bytes(),
+                offset + (magic_head_buffer.len() as u64),
+            )
+            .map_err(|_| "Error: Failed to write to metadata partition")?;
 
-            file.write_all_at(&crc32_buffer, offset + max_length).map_err(|_| "Error: Failed to write crc32");
-        };
+            file.write_all_at(&crc32_buffer, offset + max_length)
+                .map_err(|_| "Error: Failed to write crc32");
+        }
         Ok(())
     }
 
     /// search and check all metadata partition ret vec (main_driver,id,start_lba,end_lba,sector_size)
     /// search priority: name mapped block device -> hidden segment
     /// id = 0 means hidden segment
-    pub fn get_all_metadata_location(metadata: &Metadata) -> Result<Vec<(String, u32, u64, u64, u64)>, &'static str> {
+    pub fn get_all_metadata_location(
+        metadata: &Metadata,
+    ) -> Result<Vec<(String, u32, u64, u64, u64)>, &'static str> {
         let mut ret = Vec::new();
         //first test name mapped block device
         let name_ret = get_part_accelerate_location(METADATA_PARTITION_NAME);
@@ -221,16 +253,27 @@ impl Metadata {
             let userdata_start_lba = userdata_target.start_lba;
             let sector_size = get_disk_sector_size(&userdata_driver);
             //check hidden segment
-            let (metadata_start_lba, metadata_end_lba) = calculate_metadata_interval_from_low(userdata_start_lba - 1, sector_size);
+            let (metadata_start_lba, metadata_end_lba) =
+                calculate_metadata_interval_from_low(userdata_start_lba - 1, sector_size);
             //check overflows
-            let overflows = is_disk_segment_used(&userdata_driver, metadata_start_lba, metadata_end_lba);
+            let overflows =
+                is_disk_segment_used(&userdata_driver, metadata_start_lba, metadata_end_lba);
             if overflows.is_some() {
-                let error_str = format!("Error: metadata partition overflows at {:?}", overflows.unwrap());
+                let error_str = format!(
+                    "Error: metadata partition overflows at {:?}",
+                    overflows.unwrap()
+                );
                 eprintln!("{}", error_str.as_str());
                 return Err("Error: metadata partition overflows");
             };
-            ret.push((userdata_driver, 0, metadata_start_lba, metadata_end_lba, sector_size));
-        };
+            ret.push((
+                userdata_driver,
+                0,
+                metadata_start_lba,
+                metadata_end_lba,
+                sector_size,
+            ));
+        }
         Ok(ret)
     }
 
@@ -242,19 +285,30 @@ impl Metadata {
         };
         let (userdata_driver, _, userdata_start_lba, _, sector_size) = userdata_location.unwrap();
         //check hidden segment
-        let (metadata_start_lba, metadata_end_lba) = calculate_metadata_interval_from_low(userdata_start_lba - 1, sector_size);
+        let (metadata_start_lba, metadata_end_lba) =
+            calculate_metadata_interval_from_low(userdata_start_lba - 1, sector_size);
         //check overflows
-        let overflows = is_disk_segment_used(&userdata_driver, metadata_start_lba, metadata_end_lba);
+        let overflows =
+            is_disk_segment_used(&userdata_driver, metadata_start_lba, metadata_end_lba);
         if overflows.is_some() {
-            let error_str = format!("Error: metadata partition overflows at {:?}", overflows.unwrap());
+            let error_str = format!(
+                "Error: metadata partition overflows at {:?}",
+                overflows.unwrap()
+            );
             eprintln!("{}", error_str.as_str());
             return Err("Error: metadata partition overflows");
         };
-        Ok((userdata_driver, 0, metadata_start_lba, metadata_end_lba, sector_size))
+        Ok((
+            userdata_driver,
+            0,
+            metadata_start_lba,
+            metadata_end_lba,
+            sector_size,
+        ))
     }
 }
 
-#[derive(Debug,Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Slot {
     pub slot_name: String,
     pub backup_type_code: i32,
@@ -264,7 +318,7 @@ pub struct Slot {
     pub backup_target_end: u64,
     pub backup_target_attr: String,
     //reserve for other back_trait
-    pub dyn_partition_set: HashMap<String, PartitionRawTarget>,// parts to be made into dyn partition,(part_name,part_target)
+    pub dyn_partition_set: HashMap<String, PartitionRawTarget>, // parts to be made into dyn partition,(part_name,part_target)
 }
 impl fmt::Display for Slot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -274,27 +328,27 @@ impl fmt::Display for Slot {
         write!(f, "Backup Exclude List:\n")?;
         let mut counter = 0;
         for exclude in &self.backup_exclude_list {
-            counter+=1;
-            write!(f, "\t{} : {}\n", counter,exclude)?;
-        };
+            counter += 1;
+            write!(f, "\t{} : {}\n", counter, exclude)?;
+        }
         write!(f, "Dynamic Partition Set:\n")?;
-        counter=0;
+        counter = 0;
         for (part_name, part_target) in &self.dyn_partition_set {
-            counter+=1;
+            counter += 1;
             write!(f, "\t-- {counter} --\n\tPartition Name: {}\n\tDriver: {}\n\tStart LBA: {}\n\tEnd LBA: {}\n\n",
                    part_name, part_target.driver, part_target.start_lba, part_target.end_lba)?;
         }
         Ok(())
     }
 }
-#[derive(Debug,Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartitionRawTarget {
     pub part_name: String,
     pub driver: String,
     pub start_lba: u64,
     pub end_lba: u64,
     pub type_guid: String,
-    pub flags : u64
+    pub flags: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -323,4 +377,3 @@ pub fn calculate_metadata_interval_from_low(end_lba: u64, sector: u64) -> (u64, 
     start_lba += 1;
     (start_lba, end_lba)
 }
-

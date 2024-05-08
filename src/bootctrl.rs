@@ -16,10 +16,46 @@ const AB_SLOT_INACTIVE: u8 = 0;
 const AB_SLOT_A_SUFFIX: &str = "_a";
 const AB_SLOT_B_SUFFIX: &str = "_b";
 const PTN_XBL: &str = "xbl";
-const PTN_SWAP_LIST: [&str; 14] = [PTN_XBL, "abl", "aop", "devcfg", "dtbo", "hyp", "keymaster", "qupfw", "tz", "uefisecapp", "vbmeta", "vbmeta_system", "xbl_config", "featenabler"];
-const AB_PTN_LIST: [&str; 21] = [PTN_XBL, "abl", "aop", "devcfg", "dtbo", "hyp", "keymaster", "qupfw", "tz", "uefisecapp", "vbmeta", "vbmeta_system", "xbl_config", "featenabler", "boot", "vendor_boot", "system", "vendor", "system_ext", "modem", "product"];
+const PTN_SWAP_LIST: [&str; 14] = [
+    PTN_XBL,
+    "abl",
+    "aop",
+    "devcfg",
+    "dtbo",
+    "hyp",
+    "keymaster",
+    "qupfw",
+    "tz",
+    "uefisecapp",
+    "vbmeta",
+    "vbmeta_system",
+    "xbl_config",
+    "featenabler",
+];
+const AB_PTN_LIST: [&str; 21] = [
+    PTN_XBL,
+    "abl",
+    "aop",
+    "devcfg",
+    "dtbo",
+    "hyp",
+    "keymaster",
+    "qupfw",
+    "tz",
+    "uefisecapp",
+    "vbmeta",
+    "vbmeta_system",
+    "xbl_config",
+    "featenabler",
+    "boot",
+    "vendor_boot",
+    "system",
+    "vendor",
+    "system_ext",
+    "modem",
+    "product",
+];
 const BOOT_DEV_DIR: &str = "/dev/block/bootdevice/by-name";
-
 
 /// Get the current active android slot
 pub fn get_current_android_slot() -> String {
@@ -29,4 +65,3 @@ pub fn get_current_android_slot() -> String {
 pub fn change_active_android_slot(slot: &str) {
     // TODO
 }
-

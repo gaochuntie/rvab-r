@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 
-pub struct Interval{
-    start:u64,
-    end:u64,
+pub struct Interval {
+    start: u64,
+    end: u64,
 }
 impl Interval {
-    pub fn new(start:u64,end:u64) -> Self {
-        Interval{start,end}
+    pub fn new(start: u64, end: u64) -> Self {
+        Interval { start, end }
     }
     pub fn get_start(&self) -> u64 {
         self.start
@@ -45,17 +45,17 @@ pub enum IntervalState {
 /// check states of two closed intervals
 /// If the first interval (interval1) is a subset of the second interval (interval2),
 /// the function will return IntervalState::Subset.
-pub fn check_interval_state(interval1:&Interval,interval2:&Interval) -> IntervalState {
-    if interval1.start<interval2.end || interval1.start>interval2.end {
+pub fn check_interval_state(interval1: &Interval, interval2: &Interval) -> IntervalState {
+    if interval1.start < interval2.end || interval1.start > interval2.end {
         return IntervalState::Disjoint;
     }
-    if interval1.start==interval2.start && interval1.end==interval2.end {
+    if interval1.start == interval2.start && interval1.end == interval2.end {
         return IntervalState::Equal;
     }
-    if interval1.start>=interval2.start && interval1.end<=interval2.end {
+    if interval1.start >= interval2.start && interval1.end <= interval2.end {
         return IntervalState::Subset;
     }
-    if interval1.start<=interval2.start && interval1.end>=interval2.end {
+    if interval1.start <= interval2.start && interval1.end >= interval2.end {
         return IntervalState::Superset;
     }
     IntervalState::Overlap
@@ -63,7 +63,7 @@ pub fn check_interval_state(interval1:&Interval,interval2:&Interval) -> Interval
 
 /// check if any intervals in the vector overlap
 /// If any two intervals overlap, the function will return true.
-pub fn check_any_overlaps(intervals:&mut Vec<Interval>) -> bool {
+pub fn check_any_overlaps(intervals: &mut Vec<Interval>) -> bool {
     // Sort intervals by their start points
     let mut intervals = intervals;
     intervals.sort();

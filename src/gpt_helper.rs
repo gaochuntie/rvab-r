@@ -1,15 +1,15 @@
-use std::collections::{HashMap, HashSet};
-use std::{fs, io};
-use std::io::{Read, Seek, Write};
-use std::path::{Path, PathBuf};
-use gpt::{disk, GptDisk};
-use gpt::GptConfig;
-use log::debug;
-use uuid::Uuid;
 use crate::backup_factory::{BackupTrait, BackupType};
 use crate::constants::*;
-use crate::metadata::*;
 use crate::math_support::*;
+use crate::metadata::*;
+use gpt::GptConfig;
+use gpt::{disk, GptDisk};
+use log::debug;
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Seek, Write};
+use std::path::{Path, PathBuf};
+use std::{fs, io};
+use uuid::Uuid;
 
 /// Get the userdata driver path
 /// ## panic if not found
@@ -71,7 +71,15 @@ pub fn find_max_free_tuple(tuples: &Vec<(u64, u64)>) -> (u64, u64) {
 /// ## panic if no backup type available or no enough space
 /// ## panic if get part accelerate location failed
 /// ## panic if get dual part info failed
-pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba: u64, sector: u64, ex_back_fpath: &Option<String>, dual_list: &Option<String>, _back_min_size_sector: &mut u64) -> (Slot, Slot) {
+pub fn auto_layout_freespace_example(
+    target_disk: &str,
+    start_lba: u64,
+    end_lba: u64,
+    sector: u64,
+    ex_back_fpath: &Option<String>,
+    dual_list: &Option<String>,
+    _back_min_size_sector: &mut u64,
+) -> (Slot, Slot) {
     //half split
     let mut end_lba = end_lba;
     let mut start_lba = start_lba;
@@ -92,7 +100,11 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     if let Some(path) = ex_back_fpath {
         //read exclude file and add into exclude list
         let file = fs::read_to_string(path).expect("Error reading exclude list file");
-        let files: Vec<&str> = file.lines().map(|line| line.trim()).filter(|line| !line.is_empty()).collect();
+        let files: Vec<&str> = file
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .collect();
         for item in files {
             exclude_files.insert(item.to_string());
         }
@@ -100,7 +112,11 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     if let Some(path) = dual_list {
         //read exclude file and add into exclude list
         let file = fs::read_to_string(path).expect("Error reading dual list file");
-        let files: Vec<&str> = file.lines().map(|line| line.trim()).filter(|line| !line.is_empty()).collect();
+        let files: Vec<&str> = file
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .collect();
         for item in files {
             exclude_files.insert(item.to_string());
             dual_files.insert(item.to_string());
@@ -119,7 +135,8 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     if let Err(_) = backup_type.test(None) {
         panic!("Error: no backup type available");
     }
-    let back_min_size_sector = backup_type.guess_backup_target_partition_size_sector(fw_size, sector);
+    let back_min_size_sector =
+        backup_type.guess_backup_target_partition_size_sector(fw_size, sector);
     *_back_min_size_sector = back_min_size_sector;
 
     //construct slots
@@ -129,7 +146,8 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     let mut map2 = HashMap::new();
 
     for part_name in dual_files {
-        let (_driver, _id, first_lba, last_lba, sector_size) = get_part_accelerate_location(&part_name).unwrap();
+        let (_driver, _id, first_lba, last_lba, sector_size) =
+            get_part_accelerate_location(&part_name).unwrap();
 
         let length_bytes = (last_lba - first_lba + 1) * sector_size;
         let mut length_lba = length_bytes / sector;
@@ -142,13 +160,13 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
         /// TODO align partition on 2-boundary default,this is my guess
         alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, 2, true);
         p1_used_pointer = dyn_end_lba + 1;
-        let (type_guid,flags)=get_part_info(&part_name).unwrap();
+        let (type_guid, flags) = get_part_info(&part_name).unwrap();
         let part = PartitionRawTarget {
             part_name: part_name.clone(),
             driver: target_disk.to_string(),
             start_lba: dyn_start_lba,
             end_lba: dyn_end_lba,
-            type_guid : type_guid.clone(),
+            type_guid: type_guid.clone(),
             flags,
         };
         map1.insert(part_name.clone(), part.clone());
@@ -164,11 +182,11 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
             driver: target_disk.to_string(),
             start_lba: dyn_start_lba,
             end_lba: dyn_end_lba,
-            type_guid:type_guid.clone(),
+            type_guid: type_guid.clone(),
             flags,
         };
         map2.insert(part_name.clone(), part);
-    };
+    }
 
     //add userdata
     let (_, metadata1_end) = calculate_metadata_interval(p1_used_pointer, sector);
@@ -183,7 +201,10 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     let backup_target = target_disk.to_string();
     ///test space layout is correct for partition backup and binaryspace backup and losetup backup
     if back_min_size_sector > p2_size {
-        panic!("Error: no enough space for backup target {}", bytes2ieee(back_min_size_sector * sector));
+        panic!(
+            "Error: no enough space for backup target {}",
+            bytes2ieee(back_min_size_sector * sector)
+        );
     }
     if (userdata1_start_lba + (USERDATA_MIN_SIZE / sector) + back_min_size_sector) > p1_end {
         panic!("Error: no enough space for userdata1");
@@ -194,13 +215,13 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
     //userdata1
     let mut userdata1_end = p1_end - back_min_size_sector;
     alignment_partition(&mut userdata1_start_lba, &mut userdata1_end, 2, true);
-    let (type_guid,flags)=get_part_info(&USERDATA_NAME.to_string()).unwrap();
+    let (type_guid, flags) = get_part_info(&USERDATA_NAME.to_string()).unwrap();
     let userdata1 = PartitionRawTarget {
         part_name: USERDATA_NAME.to_string(),
         driver: target_disk.to_string(),
         start_lba: userdata1_start_lba,
         end_lba: userdata1_end,
-        type_guid:type_guid.clone(),
+        type_guid: type_guid.clone(),
         flags,
     };
     let mut backup1_start = userdata1_end + 1;
@@ -223,7 +244,7 @@ pub fn auto_layout_freespace_example(target_disk: &str, start_lba: u64, end_lba:
         driver: target_disk.to_string(),
         start_lba: userdata2_start_lba,
         end_lba: userdata2_end,
-        type_guid:type_guid.clone(),
+        type_guid: type_guid.clone(),
 
         flags,
     };
@@ -255,7 +276,7 @@ pub fn calculate_firmware_size(ex_back_list: &HashSet<String>) -> (u64, u64) {
 
     for item in ex_back_list {
         exclude_files.insert(item.clone());
-    };
+    }
 
     for file in files {
         let path = file.unwrap().path();
@@ -263,7 +284,9 @@ pub fn calculate_firmware_size(ex_back_list: &HashSet<String>) -> (u64, u64) {
         let filename = &path.file_name().unwrap().to_str().unwrap().to_string();
         let global_exclude_files = &BACK_EXCLUDE_LIST;
         // Skip if the file is in the exclude list
-        if exclude_files.contains(filename) || global_exclude_files.iter().any(|&x| filename.contains(x)) {
+        if exclude_files.contains(filename)
+            || global_exclude_files.iter().any(|&x| filename.contains(x))
+        {
             println!("skip excluded file {}", &path_str);
             continue;
         };
@@ -283,7 +306,11 @@ pub fn calculate_firmware_size(ex_back_list: &HashSet<String>) -> (u64, u64) {
     if firmware_size == 0 {
         panic!("Error: firmware size=0");
     }
-    println!("firmware_size:{} , {}",firmware_size, bytes2ieee(firmware_size));
+    println!(
+        "firmware_size:{} , {}",
+        firmware_size,
+        bytes2ieee(firmware_size)
+    );
     (total_num, firmware_size)
 }
 
@@ -365,24 +392,30 @@ pub fn get_block_dev_filenames() -> HashSet<String> {
 }
 
 /// get part accelerate location via gpt table,return (main_driver,id_num,first_lba,last_lba,sector_size)
-pub fn get_part_accelerate_location(part_name: &str) -> Result<(String, u32, u64, u64, u64), &'static str> {
+pub fn get_part_accelerate_location(
+    part_name: &str,
+) -> Result<(String, u32, u64, u64, u64), &'static str> {
     let path = format!("{}{}", get_block_dev_dir(), part_name);
     let disk_path = get_partition_main_driver(&path)?;
     let sector_size = get_disk_sector_size(&disk_path);
     let mut sector = disk::LogicalBlockSize::Lb512;
     if sector_size == 4096 {
         sector = disk::LogicalBlockSize::Lb4096;
-    } else if sector_size == 512 {} else {
+    } else if sector_size == 512 {
+    } else {
         return Err("Error: unsupported sector size !!!");
     };
-    let gptcfg = GptConfig::new().writable(false).logical_block_size(sector.clone());
+    let gptcfg = GptConfig::new()
+        .writable(false)
+        .logical_block_size(sector.clone());
     let mut disk = gptcfg.open(&disk_path);
     if !(disk.is_ok()) {
         return Err("Error: open disk failed");
     }
     let binding_disk = disk.unwrap();
     let (id, part) = binding_disk
-        .partitions().iter()
+        .partitions()
+        .iter()
         .find(|(_, partition)| partition.name == part_name)
         .ok_or("Error: partition not found")?;
     Ok((disk_path, *id, part.first_lba, part.last_lba, sector_size))
@@ -390,18 +423,21 @@ pub fn get_part_accelerate_location(part_name: &str) -> Result<(String, u32, u64
 
 /// get part info ,return (type_guid_str,flags)
 /// ## panic if unsupported sector size
-pub fn get_part_info(part_name:&String) -> Option<(String, u64)> {
+pub fn get_part_info(part_name: &String) -> Option<(String, u64)> {
     let path = format!("{}{}", get_block_dev_dir(), part_name);
     let disk_path = get_partition_main_driver(&path).ok()?;
     let mut sector = try_get_disk_lba(&disk_path);
-    let gptcfg = GptConfig::new().writable(false).logical_block_size(sector.clone());
+    let gptcfg = GptConfig::new()
+        .writable(false)
+        .logical_block_size(sector.clone());
     let mut disk = gptcfg.open(&disk_path);
     if !(disk.is_ok()) {
         return None;
     }
     let binding_disk = disk.unwrap();
     let ret = binding_disk
-        .partitions().iter()
+        .partitions()
+        .iter()
         .find(|(_, partition)| partition.name == *part_name);
     if ret.is_none() {
         return None;
@@ -422,24 +458,26 @@ pub fn get_disk_sector_size(disk: &str) -> u64 {
 }
 
 /// get disk gpt table
-pub fn get_gpt_disk(disk: &str,write_able:bool) -> Option<GptDisk<fs::File>> {
+pub fn get_gpt_disk(disk: &str, write_able: bool) -> Option<GptDisk<fs::File>> {
     let sector = try_get_disk_lba(disk);
-    let gptcfg = GptConfig::new().writable(write_able).logical_block_size(sector);
+    let gptcfg = GptConfig::new()
+        .writable(write_able)
+        .logical_block_size(sector);
     let disk = gptcfg.open(disk);
     if disk.is_err() {
         return None;
     }
     Some(disk.unwrap())
-
 }
 /// try get disk lba
-/// ## panic if unsupported sector size 
+/// ## panic if unsupported sector size
 pub fn try_get_disk_lba(disk: &str) -> disk::LogicalBlockSize {
     let sector_size = get_disk_sector_size(disk);
     let mut sector = disk::LogicalBlockSize::Lb512;
     if sector_size == 4096 {
         sector = disk::LogicalBlockSize::Lb4096;
-    } else if sector_size == 512 {} else {
+    } else if sector_size == 512 {
+    } else {
         panic!("Error: unsupported sector size !!!")
     };
     sector
@@ -447,20 +485,30 @@ pub fn try_get_disk_lba(disk: &str) -> disk::LogicalBlockSize {
 
 /// check if disk segment is used by table,return Option<Vec<(part_name,id)>>
 /// ## panic if any error occurs
-pub fn is_disk_segment_used(disk: &str, start_lba: u64, end_lba: u64) -> Option<Vec<(String, u32)>> {
+pub fn is_disk_segment_used(
+    disk: &str,
+    start_lba: u64,
+    end_lba: u64,
+) -> Option<Vec<(String, u32)>> {
     let sector_size = get_disk_sector_size(disk);
     let mut sector = disk::LogicalBlockSize::Lb512;
     if sector_size == 4096 {
         sector = disk::LogicalBlockSize::Lb4096;
-    } else if sector_size == 512 {} else {
+    } else if sector_size == 512 {
+    } else {
         panic!("Error: unsupported sector size !!!")
     };
-    let gptcfg = GptConfig::new().writable(false).logical_block_size(sector.clone());
+    let gptcfg = GptConfig::new()
+        .writable(false)
+        .logical_block_size(sector.clone());
     let mut disk = gptcfg.open(disk).expect("open disk failed");
     let mut find_part_name = Vec::new();
     //check if given segment is used by some partitions,if any part of the segment is used,add it to the list
     for (id, partition) in disk.partitions().iter() {
-        let interval_relat = check_interval_state(&Interval::new(start_lba, end_lba), &Interval::new(partition.first_lba, partition.last_lba));
+        let interval_relat = check_interval_state(
+            &Interval::new(start_lba, end_lba),
+            &Interval::new(partition.first_lba, partition.last_lba),
+        );
         if interval_relat != IntervalState::Disjoint {
             find_part_name.push((partition.name.clone(), *id));
         }
@@ -472,7 +520,12 @@ pub fn is_disk_segment_used(disk: &str, start_lba: u64, end_lba: u64) -> Option<
 }
 
 /// align partition lba (only shrink)
-pub fn alignment_partition(first_lba: &mut u64, last_lba: &mut u64, alignment: u64, dis_align_last_lba: bool) {
+pub fn alignment_partition(
+    first_lba: &mut u64,
+    last_lba: &mut u64,
+    alignment: u64,
+    dis_align_last_lba: bool,
+) {
     if *first_lba % alignment != 0 {
         *first_lba = *first_lba + alignment - *first_lba % alignment;
     }
@@ -500,18 +553,24 @@ pub fn get_disk_part_boundary_alignment(disk: &str) -> u32 {
 
 /// delete partition by name
 /// ## panic if unsupported sector size
-pub fn delete_part_by_name(part_name:&str) -> Result<(), &'static str> {
-    let (main_driver,id,_,_,sector_bytes)= get_part_accelerate_location(part_name)?;
+pub fn delete_part_by_name(part_name: &str) -> Result<(), &'static str> {
+    let (main_driver, id, _, _, sector_bytes) = get_part_accelerate_location(part_name)?;
     //delete partition
-    let mut sector=disk::LogicalBlockSize::Lb512;
+    let mut sector = disk::LogicalBlockSize::Lb512;
     if sector_bytes == 4096 {
         sector = disk::LogicalBlockSize::Lb4096;
-    } else if sector_bytes == 512 {} else {
+    } else if sector_bytes == 512 {
+    } else {
         panic!("Error: unsupported sector size !!!");
     };
-    let gptcfg = GptConfig::new().writable(true).logical_block_size(sector.clone());
-    let mut disk = gptcfg.open(&main_driver).map_err(|_| "Error: open disk failed")?;
-    disk.remove_partition(id).ok_or_else(|| "Error: remove partition failed")?;
+    let gptcfg = GptConfig::new()
+        .writable(true)
+        .logical_block_size(sector.clone());
+    let mut disk = gptcfg
+        .open(&main_driver)
+        .map_err(|_| "Error: open disk failed")?;
+    disk.remove_partition(id)
+        .ok_or_else(|| "Error: remove partition failed")?;
     disk.write().map_err(|_| "Error: write disk failed")?;
     Ok(())
 }
@@ -553,13 +612,15 @@ pub fn new_partition(
             // part segment is legal
             debug!(
                 "starting_lba {}, length {}, id {}",
-                first_lba, length_lba,id);
+                first_lba, length_lba, id
+            );
             debug!(
-                    "Adding partition id: {} {:?}.  first_lba: {} last_lba: {}",
-                    id,
-                    part_type,
-                    first_lba,
-                    first_lba + length_lba - 1_u64);
+                "Adding partition id: {} {:?}.  first_lba: {} last_lba: {}",
+                id,
+                part_type,
+                first_lba,
+                first_lba + length_lba - 1_u64
+            );
             let part = gpt::partition::Partition {
                 part_type_guid: part_type,
                 part_guid: uuid::Uuid::new_v4(),
@@ -584,29 +645,51 @@ pub fn new_partition(
 
 /// clone disk segment , in bytes
 /// will check
-pub fn clone_disk_segment(sdisk: &str, soffset: u64, slength: u64, tdisk: &str, toffset: u64, tlength: u64,allow_override_part:bool)->Result<(),&'static str>{
+pub fn clone_disk_segment(
+    sdisk: &str,
+    soffset: u64,
+    slength: u64,
+    tdisk: &str,
+    toffset: u64,
+    tlength: u64,
+    allow_override_part: bool,
+) -> Result<(), &'static str> {
     if slength != tlength {
-        return Err("Error: source and target length must be equal")
+        return Err("Error: source and target length must be equal");
     };
     let tsector = get_disk_sector_size(tdisk);
     let tstart_lba = toffset / tsector;
-    let tend_lba = (toffset + tlength-1+tsector) / tsector;
+    let tend_lba = (toffset + tlength - 1 + tsector) / tsector;
     let override_list = is_disk_segment_used(tdisk, tstart_lba, tend_lba);
     if override_list.is_some() && !allow_override_part {
-        return Err("Error: target segment is used by some partitions")
+        return Err("Error: target segment is used by some partitions");
     };
-    let sfile = fs::OpenOptions::new().read(true).open(sdisk).map_err(|_| "Error: open source disk failed")?;
-    let tfile = fs::OpenOptions::new().write(true).open(tdisk).map_err(|_| "Error: open target disk failed")?;
+    let sfile = fs::OpenOptions::new()
+        .read(true)
+        .open(sdisk)
+        .map_err(|_| "Error: open source disk failed")?;
+    let tfile = fs::OpenOptions::new()
+        .write(true)
+        .open(tdisk)
+        .map_err(|_| "Error: open target disk failed")?;
     let mut sfile = io::BufReader::new(sfile);
     let mut tfile = io::BufWriter::new(tfile);
-    sfile.seek(io::SeekFrom::Start(soffset)).map_err(|_| "Error: seek source disk failed")?;
-    tfile.seek(io::SeekFrom::Start(toffset)).map_err(|_| "Error: seek target disk failed")?;
+    sfile
+        .seek(io::SeekFrom::Start(soffset))
+        .map_err(|_| "Error: seek source disk failed")?;
+    tfile
+        .seek(io::SeekFrom::Start(toffset))
+        .map_err(|_| "Error: seek target disk failed")?;
     let mut buffer = vec![0; 4096];
     let mut remain = slength;
     while remain > 0 {
         let read_size = if remain > 4096 { 4096 } else { remain as usize };
-        sfile.read_exact(&mut buffer[..read_size]).map_err(|_| "Error: read source disk failed")?;
-        tfile.write_all(&buffer[..read_size]).map_err(|_| "Error: write target disk failed")?;
+        sfile
+            .read_exact(&mut buffer[..read_size])
+            .map_err(|_| "Error: read source disk failed")?;
+        tfile
+            .write_all(&buffer[..read_size])
+            .map_err(|_| "Error: write target disk failed")?;
         remain -= read_size as u64;
     }
     Ok(())

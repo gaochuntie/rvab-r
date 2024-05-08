@@ -1,22 +1,22 @@
-use std::fmt;
-use serde::{Deserialize, Serialize};
 use crate::metadata::Metadata;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// BackupTrait is a trait for backup and restore object between original disk segement and unknown target
 /// The target could be a file, a partition, a disk, a network, a cloud, etc.
 /// Inner implementation ways include partition,binary space disk segement,losetup partition)
 pub trait BackupTrait {
-    fn backup(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str>;
-    fn restore(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str>;
+    fn backup(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str>;
+    fn restore(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str>;
     //backup gpt table
-    fn backup_gpt(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str>;
+    fn backup_gpt(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str>;
     //restore gpt table
-    fn restore_gpt(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str>;
+    fn restore_gpt(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str>;
     //verify backup
-    fn verify(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str>;
-    fn test(&self,metadata: Option<&Metadata>) -> Result<(),&str>;
+    fn verify(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str>;
+    fn test(&self, metadata: Option<&Metadata>) -> Result<(), &str>;
 }
-#[derive(Debug,Serialize,Deserialize,Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub enum BackupType {
     Partition,
     BinarySpace,
@@ -24,11 +24,15 @@ pub enum BackupType {
 }
 impl fmt::Display for BackupType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", match self {
-            BackupType::Partition => "partition",
-            BackupType::BinarySpace => "binaryspace",
-            BackupType::Losetup => "losetup",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                BackupType::Partition => "partition",
+                BackupType::BinarySpace => "binaryspace",
+                BackupType::Losetup => "losetup",
+            }
+        )
     }
 }
 
@@ -52,50 +56,54 @@ impl BackupType {
     }
     /// Guess the backup target partition size (bytes)
     /// over 10% of the firmware size
-    pub fn guess_backup_target_partition_size(&self,firmware_size_b: u64) -> u64 {
+    pub fn guess_backup_target_partition_size(&self, firmware_size_b: u64) -> u64 {
         match self {
             BackupType::Partition => {
-                let add_on=firmware_size_b/10;
-                firmware_size_b+add_on
+                let add_on = firmware_size_b / 10;
+                firmware_size_b + add_on
             }
             BackupType::BinarySpace => {
-                let add_on=firmware_size_b/10;
-                firmware_size_b+add_on
+                let add_on = firmware_size_b / 10;
+                firmware_size_b + add_on
             }
             BackupType::Losetup => {
-                let add_on=firmware_size_b/10;
-                firmware_size_b+add_on
+                let add_on = firmware_size_b / 10;
+                firmware_size_b + add_on
             }
         }
     }
 
-    pub fn guess_backup_target_partition_size_sector(&self,firmware_size_b: u64,sector:u64) -> u64 {
+    pub fn guess_backup_target_partition_size_sector(
+        &self,
+        firmware_size_b: u64,
+        sector: u64,
+    ) -> u64 {
         let size = self.guess_backup_target_partition_size(firmware_size_b);
-        let mut size_sector=size/sector;
-        if size%sector!=0 {
-            size_sector+=1;
+        let mut size_sector = size / sector;
+        if size % sector != 0 {
+            size_sector += 1;
         }
         size_sector
     }
 }
 
 impl BackupTrait for BackupType {
-    fn backup(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str> {
+    fn backup(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str> {
         Ok(())
     }
-    fn restore(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str> {
+    fn restore(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str> {
         Ok(())
     }
-    fn backup_gpt(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str> {
+    fn backup_gpt(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str> {
         Ok(())
     }
-    fn restore_gpt(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str> {
+    fn restore_gpt(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str> {
         Ok(())
     }
-    fn verify(&self,metadata: &Metadata,orig_file_path: &str) -> Result<(),&str> {
+    fn verify(&self, metadata: &Metadata, orig_file_path: &str) -> Result<(), &str> {
         Ok(())
     }
-    fn test(&self,metadata: Option<&Metadata>) -> Result<(),&str> {
+    fn test(&self, metadata: Option<&Metadata>) -> Result<(), &str> {
         match self {
             BackupType::Partition => {}
             BackupType::BinarySpace => {}
@@ -103,7 +111,4 @@ impl BackupTrait for BackupType {
         }
         Ok(())
     }
-
 }
-
-

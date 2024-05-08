@@ -12,7 +12,6 @@ use std::fs;
 // pub const CONFIG_INIT_BACKUP_TARGET_MIN_SIZE: &str = "backup_target_min_size";
 // pub const CONFIG_INIT_WARNING: &str = "Warning";
 
-
 pub const EMMC_TRAIT_FILE: &str = "/dev/block/mmcblk0";
 pub const USERDATA_NAME: &str = "userdata";
 pub const USERDATA_LINK_PATH: &str = "/dev/block/by-name/userdata";
@@ -21,12 +20,10 @@ pub const USERDATA_LINK_PATH_PLATFORM: &str = "/dev/block/platform/soc/*/by-name
 /// 5G min size for userdata
 pub const USERDATA_MIN_SIZE: u64 = 1024 * 1024 * 1024 * 5;
 
-
 pub const BLOCK_DEV_NAME_MAPPER: &str = "/dev/block/by-name/";
 pub const BLOCK_DEV_NAME_BOOT: &str = "/dev/block/bootdevice/by-name/";
 pub const BLOCK_DEV_NAME_PLATFORM: &str = "/dev/block/platform/soc/*/by-name/";
 pub const BLOCK_DEV_DIR: &str = "/dev/block/";
-
 
 pub const BACK_EXCLUDE_LIST: [&'static str; 1] = ["userdata"];
 pub const METADATA_PARTITION_NAME: &str = "rvab_metadata";
@@ -50,4 +47,3 @@ pub fn get_block_dev_dir() -> String {
     }
     panic!("Error: android block dev name mapper dir not found");
 }
-
