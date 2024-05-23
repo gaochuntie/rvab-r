@@ -87,10 +87,13 @@ pub fn auto_layout_freespace_example(
     let p2_size = (end_lba - start_lba + 1) - p1_size;
 
     let mut p1_end = start_lba + p1_size - 1;
-    alignment_partition(&mut start_lba, &mut p1_end, 2, true);
+
+    let part_alignment = compute_alignment(target_disk);
+    println!("part_alignment:{}", part_alignment);
+    alignment_partition(&mut start_lba, &mut p1_end, part_alignment, true);
 
     let mut p2_start = p1_end + 1;
-    alignment_partition(&mut p2_start, &mut end_lba, 2, true);
+    alignment_partition(&mut p2_start, &mut end_lba, part_alignment, true);
 
     let mut p1_used_pointer = start_lba;
     let mut p2_used_pointer = p2_start;
@@ -157,8 +160,7 @@ pub fn auto_layout_freespace_example(
         //for slot1
         let mut dyn_start_lba = p1_used_pointer;
         let mut dyn_end_lba = dyn_start_lba + length_lba - 1;
-        /// TODO align partition on 2-boundary default,this is my guess
-        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, 2, true);
+        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, part_alignment, true);
         p1_used_pointer = dyn_end_lba + 1;
         let (type_guid, flags) = get_part_info(&part_name).unwrap();
         let part = PartitionRawTarget {
@@ -174,8 +176,7 @@ pub fn auto_layout_freespace_example(
         //for slot2
         let mut dyn_start_lba = p2_used_pointer;
         let mut dyn_end_lba = dyn_start_lba + length_lba - 1;
-        /// TODO align partition on 2-boundary default,this is my guess
-        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, 2, true);
+        alignment_partition(&mut dyn_start_lba, &mut dyn_end_lba, part_alignment, true);
         p2_used_pointer = dyn_end_lba + 1;
         let part = PartitionRawTarget {
             part_name: part_name.clone(),
@@ -191,15 +192,15 @@ pub fn auto_layout_freespace_example(
     //add userdata
     let (_, metadata1_end) = calculate_metadata_interval(p1_used_pointer, sector);
     let mut userdata1_start_lba = metadata1_end + 1;
-    alignment_partition(&mut userdata1_start_lba, &mut 0, 2, false);
+    alignment_partition(&mut userdata1_start_lba, &mut 0, part_alignment, false);
     p1_used_pointer = userdata1_start_lba;
     let (_, metadata2_end) = calculate_metadata_interval(p2_used_pointer, sector);
     let mut userdata2_start_lba = metadata2_end + 1;
-    alignment_partition(&mut userdata2_start_lba, &mut 0, 2, false);
+    alignment_partition(&mut userdata2_start_lba, &mut 0, part_alignment, false);
     p2_used_pointer = userdata2_start_lba;
 
     let backup_target = target_disk.to_string();
-    ///test space layout is correct for partition backup and binaryspace backup and losetup backup
+    //test space layout is correct for partition backup and binaryspace backup and losetup backup
     if back_min_size_sector > p2_size {
         panic!(
             "Error: no enough space for backup target {}",
@@ -214,7 +215,12 @@ pub fn auto_layout_freespace_example(
     };
     //userdata1
     let mut userdata1_end = p1_end - back_min_size_sector;
-    alignment_partition(&mut userdata1_start_lba, &mut userdata1_end, 2, true);
+    alignment_partition(
+        &mut userdata1_start_lba,
+        &mut userdata1_end,
+        part_alignment,
+        true,
+    );
     let (type_guid, flags) = get_part_info(&USERDATA_NAME.to_string()).unwrap();
     let userdata1 = PartitionRawTarget {
         part_name: USERDATA_NAME.to_string(),
@@ -238,7 +244,12 @@ pub fn auto_layout_freespace_example(
     };
     //userdata2
     let mut userdata2_end = end_lba - back_min_size_sector;
-    alignment_partition(&mut userdata2_start_lba, &mut userdata2_end, 2, true);
+    alignment_partition(
+        &mut userdata2_start_lba,
+        &mut userdata2_end,
+        part_alignment,
+        true,
+    );
     let userdata2 = PartitionRawTarget {
         part_name: USERDATA_NAME.to_string(),
         driver: target_disk.to_string(),
@@ -599,7 +610,7 @@ pub fn new_partition(
     match disk.take_partitions().get(&id) {
         // TODO err type
         Some(p) if p.is_used() => return Err(gpt::GptError::OverflowPartitionCount),
-        /// Allow unused ids , because we can allow to modify the part count
+        // Allow unused ids , because we can allow to modify the part count
         None => {}
         _ => {
             // TODO I don't know what will happen in this scope
@@ -693,4 +704,57 @@ pub fn clone_disk_segment(
         remain -= read_size as u64;
     }
     Ok(())
+}
+/// Compute sector alignment based on the current partitions (if any). Each
+/// partition's starting LBA is examined, and if it's divisible by a power-of-2
+/// value less than or equal to the DEFAULT_ALIGNMENT value (adjusted for the
+/// sector size), but not by the previously-located alignment value, then the
+/// alignment value is adjusted down. If the computed alignment is less than 8
+/// and the disk is bigger than SMALLEST_ADVANCED_FORMAT, resets it to 8. This
+/// is a safety measure for Advanced Format drives. If no partitions are
+/// defined, the alignment value is set to DEFAULT_ALIGNMENT (2048) (or an
+/// adjustment of that based on the current sector size). The result is that new
+/// drives are aligned to 2048-sector multiples but the program won't complain
+/// about other alignments on existing disks unless a smaller-than-8 alignment
+/// is used on big disks (as safety for Advanced Format drives).
+/// Returns the computed alignment value.
+/// Ported from gptfdisk's gpt.cc
+/// ## panic if unable to calculate alignment
+pub fn compute_alignment(disk_path: &str) -> u64 {
+    let mut disk = get_gpt_disk(disk_path, false).expect("Error: open disk failed");
+    const DEFAULT_ALIGNMENT: u64 = 2048;
+    const MIN_AF_ALIGNMENT: u64 = 8;
+    // Below constant corresponds to a ~279GiB (300GB) disk, since the
+    // smallest Advanced Format drive I know of is 320GB in size
+    const SMALLEST_ADVANCED_FORMAT: u64 = 585_937_500; // 320GB
+                                                       //set this as default
+    const SECTOR_SIZE: u64 = 512;
+    let mut align = DEFAULT_ALIGNMENT;
+    let block_size = disk.logical_block_size().as_u64();
+    if block_size > 0 {
+        align = DEFAULT_ALIGNMENT * SECTOR_SIZE / block_size;
+    }
+
+    let mut exponent = (align as f64).log2() as u32;
+    let partitions = disk.take_partitions();
+
+    for partition in partitions.values() {
+        if partition.is_used() {
+            let mut found = false;
+            while !found {
+                align = u64::pow(2, exponent);
+                if (partition.first_lba % align) == 0 {
+                    found = true;
+                } else {
+                    exponent -= 1;
+                }
+            } //while
+        } //if
+    } //for
+      // Warning: This is always smaller than actual disk size
+    let disk_fake_size_lba = disk.header().last_usable + 1;
+    if align < MIN_AF_ALIGNMENT && disk_fake_size_lba >= SMALLEST_ADVANCED_FORMAT {
+        align = MIN_AF_ALIGNMENT;
+    }
+    align
 }
