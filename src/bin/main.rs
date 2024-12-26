@@ -7,10 +7,9 @@ use librvab_cli_r::{
 };
 use rand::Rng;
 use std::cmp::min;
-use std::fmt::Write;
-use std::thread::current;
+use std::fmt;
+use std::thread;
 use std::time::Duration;
-use std::{fs, thread};
 
 #[derive(FromArgs)]
 /// rvab command line multi call tool,
@@ -240,7 +239,7 @@ pub fn test_indicatif_download() {
     let pb = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
         .unwrap()
-        .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+        .with_key("eta", |state: &ProgressState, w: &mut dyn fmt::Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
         .progress_chars("#>-"));
 
     while downloaded < total_size {

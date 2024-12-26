@@ -24,4 +24,5 @@ uuid = "1.8.0"
 log = "0.4.21"
 indicatif = "0.17.8"
 rand = "0.9.0-alpha.1"
-
+fscommon = "0.1.1"
+fatfs = "0.3.6"

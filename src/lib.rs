@@ -7,6 +7,7 @@ mod backup_partition;
 mod bootctrl;
 mod config_helper;
 pub mod constants;
+mod fatfs_helper;
 pub mod gpt_helper;
 mod math_support;
 pub mod metadata;
