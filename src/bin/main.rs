@@ -10,7 +10,6 @@ use std::cmp::min;
 use std::fmt;
 use std::thread;
 use std::time::Duration;
-
 #[derive(FromArgs)]
 /// rvab command line multi call tool,
 /// manage <real> virtual A/B/C/D... slots for Android devices
@@ -40,7 +39,7 @@ enum Mode {
 #[argh(
     subcommand,
     name = "init",
-    description = "Use -o <output file> to generate a template config file. \
+    description = "Use -t <output file> to generate a template config file. \
 Use -c <config> to check and test config file without modify disk. \
 Use -f <config> to init userdata partition then. \
 Use -full <config> to init and sync(clone) all dyn partitions except userdata",
@@ -229,6 +228,9 @@ fn main() {
     }
 }
 
+/*
+test indicatif
+ */
 pub fn test_indicatif() {
     test_indicatif_multi();
 }
